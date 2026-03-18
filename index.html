@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IB Dashboard 2025-26</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- SIDEBAR -->
+  <aside>
+    <div class="brand-block">
+      <h1 class="display-text">IB<br>2025<br>26.</h1>
+    </div>
+
+    <div class="meta-grid">
+      <div class="meta-item">
+        <div class="mono-label" style="color:#888">Programme</div>
+        <div class="meta-value">IB 2025-26</div>
+      </div>
+      <div class="meta-item">
+        <div class="mono-label" style="color:#888">Sprint</div>
+        <div id="meta-sprint" class="meta-value">—</div>
+      </div>
+      <div class="meta-item">
+        <div class="mono-label" style="color:#888">Date</div>
+        <div id="meta-date" class="meta-value">—</div>
+      </div>
+      <div class="meta-item">
+        <div class="mono-label" style="color:#888">Env</div>
+        <div class="meta-value">ATHENS</div>
+      </div>
+    </div>
+
+    <ul class="nav-list">
+      <li class="nav-item" data-view="dashboard">
+        <span class="num">01</span>
+        <div>
+          <div class="display-text" style="font-size:24px">Dashboard</div>
+          <div class="mono-label">Overview</div>
+        </div>
+      </li>
+      <li class="nav-item" data-view="assignments">
+        <span class="num">02</span>
+        <div>
+          <div class="display-text" style="font-size:24px">Assignments</div>
+          <div class="mono-label">Tasks &amp; Deadlines</div>
+        </div>
+      </li>
+      <li class="nav-item" data-view="ee-tracker">
+        <span class="num">03</span>
+        <div>
+          <div class="display-text" style="font-size:24px">EE Tracker</div>
+          <div class="mono-label">Extended Essay</div>
+        </div>
+      </li>
+      <li class="nav-item" data-view="side-quests">
+        <span class="num">04</span>
+        <div>
+          <div class="display-text" style="font-size:24px">Side Quests</div>
+          <div class="mono-label">Projects &amp; Extras</div>
+        </div>
+      </li>
+      <li class="nav-item" data-view="greek-portfolio">
+        <span class="num">05</span>
+        <div>
+          <div class="display-text" style="font-size:24px">Greek Portfolio</div>
+          <div class="mono-label">Language &amp; Culture</div>
+        </div>
+      </li>
+      <li class="nav-item" data-view="dev-pm">
+        <span class="num">06</span>
+        <div>
+          <div class="display-text" style="font-size:24px">Dev PM</div>
+          <div class="mono-label">Projects &amp; Tickets</div>
+        </div>
+      </li>
+    </ul>
+  </aside>
+
+  <!-- MAIN -->
+  <main>
+    <header>
+      <div class="breadcrumbs" id="header-breadcrumb">HOME / DASHBOARD</div>
+      <div class="user-status">
+        <span class="mono-label" style="color:#888">PROGRAMME</span>
+        <span class="role">IB DIPLOMA</span>
+      </div>
+    </header>
+
+    <div data-view="dashboard" style="display:none"></div>
+    <div data-view="assignments" style="display:none"></div>
+    <div data-view="ee-tracker" style="display:none"></div>
+    <div data-view="side-quests" style="display:none"></div>
+    <div data-view="greek-portfolio" style="display:none"></div>
+    <div data-view="dev-pm" style="display:none"></div>
+  </main>
+
+  <!-- MODAL -->
+  <div id="modal-overlay" class="modal-overlay">
+    <div id="modal-box" class="modal-box"></div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

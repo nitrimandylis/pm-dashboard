@@ -1,0 +1,529 @@
+<html lang="en" vid="0"><head vid="1">
+    <meta charset="UTF-8" vid="2">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" vid="3">
+    <title vid="4">Student Body Governance</title>
+    <style vid="5">
+        
+
+        :root {
+            --bg-dark: #111111;
+            --bg-light: #1A1A1A;
+            --text-dark: #FFFFFF;
+            --text-light: #FFFFFF;
+            --accent: #E8FF47;
+            
+            --font-display: 'Impact', 'Oswald', 'Anton', sans-serif;
+            --font-body: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+            
+            --spacing-xs: 4px;
+            --spacing-sm: 12px;
+            --spacing-md: 24px;
+            --spacing-lg: 48px;
+            --spacing-xl: 96px;
+
+            --border-light: 1px solid rgba(255, 255, 255, 0.1);
+            --border-dark: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            font-size: 14px;
+            line-height: 1.4;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        
+        .display-text {
+            font-family: var(--font-display);
+            text-transform: uppercase;
+            line-height: 0.85;
+            letter-spacing: -0.02em;
+        }
+
+        .mono-label {
+            font-family: var(--font-body);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+
+        
+        
+        
+        aside {
+            width: 380px;
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            display: flex;
+            flex-direction: column;
+            padding: var(--spacing-md);
+            border-right: 1px solid #222;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 10;
+        }
+
+        .brand-block {
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .brand-block h1 {
+            font-size: 82px;
+            font-weight: 400;
+            transform: scaleY(1.3); 
+            transform-origin: top left;
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-lg);
+            border-top: var(--border-light);
+            padding-top: var(--spacing-sm);
+        }
+
+        .nav-list {
+            list-style: none;
+            margin-top: auto;
+        }
+
+        .nav-item {
+            border-top: var(--border-light);
+            padding: var(--spacing-sm) 0;
+            cursor: pointer;
+            transition: padding-left 0.2s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .nav-item:hover {
+            padding-left: 10px;
+            background: linear-gradient(90deg, rgba(232, 255, 71, 0.05), transparent);
+        }
+
+        .nav-item span.num {
+            font-family: var(--font-display);
+            font-size: 24px;
+            opacity: 0.5;
+            line-height: 1;
+        }
+
+        .nav-item span.label {
+            text-align: right;
+        }
+
+        .nav-active {
+            color: #000000;
+            background-color: var(--accent);
+            padding-left: var(--spacing-sm);
+        }
+        .nav-active:hover {
+            color: #000000;
+            background-color: var(--accent);
+            padding-left: var(--spacing-sm);
+        }
+
+        
+        main {
+            flex-grow: 1;
+            background-color: var(--bg-light);
+            overflow-y: auto;
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            grid-template-rows: auto 1fr;
+        }
+
+        
+        header {
+            grid-column: 1 / -1;
+            padding: var(--spacing-md);
+            border-bottom: var(--border-dark);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .breadcrumbs {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .user-status {
+            text-align: right;
+        }
+
+        .user-status .role {
+            display: block;
+            font-weight: bold;
+            font-size: 18px;
+            color: var(--accent);
+        }
+
+        
+        .content-area {
+            grid-column: 1 / -1;
+            padding: var(--spacing-lg);
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: var(--spacing-lg);
+        }
+
+        
+        .data-section {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .section-header {
+            font-family: var(--font-display);
+            font-size: 48px;
+            margin-bottom: var(--spacing-md);
+            border-bottom: 4px solid var(--accent);
+            padding-bottom: var(--spacing-xs);
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        
+        .section-header span.tag {
+            font-family: var(--font-body);
+            font-size: 12px;
+            background: var(--accent);
+            color: #000000;
+            padding: 2px 6px;
+            border-radius: 0;
+            letter-spacing: 0.05em;
+            vertical-align: middle;
+            transform: translateY(-8px);
+        }
+
+        .task-list {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .task-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 80px;
+            padding: var(--spacing-sm) 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            align-items: baseline;
+            cursor: pointer;
+        }
+
+        .task-row:hover {
+            background-color: #222222;
+        }
+
+        .task-row .subject {
+            font-weight: 700;
+        }
+
+        .task-row .status {
+            text-align: right;
+            font-family: monospace;
+            color: var(--accent);
+        }
+
+        
+        .club-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-md);
+        }
+
+        .club-card {
+            background: #252525;
+            border: 1px solid transparent;
+            position: relative;
+            aspect-ratio: 3/4;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: all 0.2s;
+            overflow: hidden;
+        }
+
+        .club-card:hover {
+            border: 1px solid var(--accent);
+        }
+
+        .club-image {
+            width: 100%;
+            height: 60%;
+            background-color: #333;
+            filter: grayscale(100%) contrast(120%);
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+        
+        .club-image::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+        }
+
+        .club-info {
+            padding: var(--spacing-sm);
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            color: #FFFFFF;
+        }
+
+        .club-name {
+            font-family: var(--font-display);
+            font-size: 32px;
+            line-height: 0.9;
+            margin-bottom: 8px;
+        }
+
+        .club-meta {
+            font-size: 11px;
+            border-top: 1px solid #333;
+            padding-top: 8px;
+            display: flex;
+            justify-content: space-between;
+            color: #888;
+        }
+
+        
+        .notice-board {
+            grid-column: 1 / -1;
+            background-color: #000000;
+            color: #FFFFFF;
+            padding: var(--spacing-md);
+            margin-top: var(--spacing-md);
+            position: relative;
+            border: 1px solid #333;
+        }
+
+        .notice-headline {
+            font-family: var(--font-display);
+            font-size: 6vw;
+            line-height: 0.8;
+            text-transform: uppercase;
+        }
+        
+        .notice-headline span {
+            display: block;
+            color: transparent;
+            -webkit-text-stroke: 1px #FFFFFF;
+        }
+        
+        .notice-headline span.filled {
+            color: var(--accent);
+            -webkit-text-stroke: 0;
+        }
+
+        .notice-footer {
+            margin-top: var(--spacing-md);
+            display: flex;
+            justify-content: space-between;
+            font-family: monospace;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            padding-top: var(--spacing-sm);
+            color: #888;
+        }
+
+        
+        .status-circle {
+            width: 32px;
+            height: 32px;
+            border: 2px solid var(--accent);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            color: var(--accent);
+        }
+
+        
+        .img-debate { background-image: url('https://images.unsplash.com/photo-1575320215752-19d273570267?q=80&w=600&auto=format&fit=crop'); }
+        .img-robotics { background-image: url('https://images.unsplash.com/photo-1581092921461-eab62e97a782?q=80&w=600&auto=format&fit=crop'); }
+
+    </style>
+</head>
+<body vid="6">
+
+    
+    <aside vid="7">
+        <div class="brand-block" vid="8">
+            <h1 class="display-text" vid="9">STUDENT<br vid="10">BODY<br vid="11">GOV.</h1>
+            <div class="status-circle" style="margin-top: 12px;" vid="12">IB</div>
+        </div>
+
+        <div class="meta-grid" vid="13">
+            <div vid="14">
+                <div class="mono-label" style="color: #888;" vid="15">Term</div>
+                <div vid="16">Spring 2024</div>
+            </div>
+            <div vid="17">
+                <div class="mono-label" style="color: #888;" vid="18">Week</div>
+                <div vid="19">10 (B)</div>
+            </div>
+            <div vid="20">
+                <div class="mono-label" style="color: #888;" vid="21">User</div>
+                <div vid="22">Alex M.</div>
+            </div>
+            <div vid="23">
+                <div class="mono-label" style="color: #888;" vid="24">ID</div>
+                <div vid="25">#8922</div>
+            </div>
+        </div>
+
+        <ul class="nav-list" vid="26">
+            <li class="nav-item nav-active" vid="27">
+                <span class="num" vid="28">01</span>
+                <div vid="29">
+                    <div class="display-text" style="font-size: 24px;" vid="30">Dashboard</div>
+                    <div class="mono-label" vid="31">Overview</div>
+                </div>
+            </li>
+            <li class="nav-item" vid="32">
+                <span class="num" vid="33">02</span>
+                <div vid="34">
+                    <div class="display-text" style="font-size: 24px;" vid="35">Responsibilities</div>
+                    <div class="mono-label" vid="36">CAS / EE / TOK</div>
+                </div>
+            </li>
+            <li class="nav-item" vid="37">
+                <span class="num" vid="38">03</span>
+                <div vid="39">
+                    <div class="display-text" style="font-size: 24px;" vid="40">Clubs</div>
+                    <div class="mono-label" vid="41">Manage &amp; Join</div>
+                </div>
+            </li>
+            <li class="nav-item" vid="42">
+                <span class="num" vid="43">04</span>
+                <div vid="44">
+                    <div class="display-text" style="font-size: 24px;" vid="45">Events</div>
+                    <div class="mono-label" vid="46">Calendar</div>
+                </div>
+            </li>
+        </ul>
+    </aside>
+
+    
+    <main vid="47">
+        <header vid="48">
+            <div class="breadcrumbs" vid="49">HOME / DASHBOARD</div>
+            <div class="user-status" vid="50">
+                <span class="mono-label" style="color: #888;" vid="51">CURRENT STATUS</span>
+                <span class="role" vid="52">GOOD STANDING</span>
+            </div>
+        </header>
+
+        <div class="content-area" vid="53">
+            
+            
+            <section class="data-section" vid="54">
+                <div class="section-header" vid="55">
+                    IB CORE
+                    <span class="tag" vid="56">PRIORITY</span>
+                </div>
+                
+                <div class="task-list" vid="57">
+                    <div class="mono-label" style="margin-bottom: 8px; color: #888;" vid="58">Extended Essay</div>
+                    <div class="task-row" vid="59">
+                        <div vid="60">First Draft Submission</div>
+                        <div style="color: #888;" vid="61">History HL</div>
+                        <div class="status" vid="62">2 DAYS</div>
+                    </div>
+                    <div class="task-row" vid="63">
+                        <div vid="64">Supervisor Meeting</div>
+                        <div style="color: #888;" vid="65">Room 304</div>
+                        <div class="status" vid="66">DONE</div>
+                    </div>
+
+                    <div class="mono-label" style="margin-top: 24px; margin-bottom: 8px; color: #888;" vid="67">Creativity Activity Service</div>
+                    <div class="task-row" vid="68">
+                        <div vid="69">Service Project Log</div>
+                        <div style="color: #888;" vid="70">Habitat for Humanity</div>
+                        <div class="status" vid="71">PENDING</div>
+                    </div>
+                    <div class="task-row" vid="72">
+                        <div vid="73">Activity Reflection</div>
+                        <div style="color: #888;" vid="74">Tennis Team</div>
+                        <div class="status" vid="75">LATE</div>
+                    </div>
+
+                    <div class="mono-label" style="margin-top: 24px; margin-bottom: 8px; color: #888;" vid="76">Theory of Knowledge</div>
+                    <div class="task-row" vid="77">
+                        <div vid="78">Essay Title Selection</div>
+                        <div style="color: #888;" vid="79">Prescribed Titles</div>
+                        <div class="status" vid="80">5 DAYS</div>
+                    </div>
+                </div>
+            </section>
+
+            
+            <section class="data-section" vid="81">
+                <div class="section-header" vid="82">
+                    CLUBS
+                    <span class="tag" vid="83">ACTIVE</span>
+                </div>
+
+                <div class="club-grid" vid="84">
+                    <div class="club-card" vid="85">
+                        <div class="club-image img-debate" vid="86"></div>
+                        <div class="club-info" vid="87">
+                            <div class="club-name" vid="88">DEBATE SOCIETY</div>
+                            <div class="club-meta" vid="89">
+                                <span vid="90">THU 15:30</span>
+                                <span vid="91">RM 101</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="club-card" vid="92">
+                        <div class="club-image img-robotics" vid="93"></div>
+                        <div class="club-info" vid="94">
+                            <div class="club-name" vid="95">ROBOTICS</div>
+                            <div class="club-meta" vid="96">
+                                <span vid="97">FRI 16:00</span>
+                                <span vid="98">LAB 4</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                
+                <div class="notice-board" vid="99">
+                    <div class="notice-headline" vid="100">
+                        <span class="filled" vid="101">ELECTION</span>
+                        <span vid="102">WEEK IS</span>
+                        <span vid="103">COMING</span>
+                    </div>
+                    <div class="notice-footer" vid="104">
+                        <span vid="105">NOMINATIONS OPEN</span>
+                        <span vid="106">FORM 6B</span>
+                    </div>
+                </div>
+
+            </section>
+        </div>
+    </main>
+
+
+</body></html>

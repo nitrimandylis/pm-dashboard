@@ -1,0 +1,1258 @@
+// ============================================================
+// IMPORTS
+// ============================================================
+import {
+  SUBJECTS, STATUS, PRIORITY, SIDE_QUEST_STATUSES, GREEK_TEXT_STATUSES,
+  tasks, createTask, updateTask, deleteTask,
+  projects, createProject, updateProject, deleteProject,
+  ee, updateEE, addMeeting,
+  greek, updateGreek, updateGreekText,
+  // PM
+  getPMProjects, createPMProject, updatePMProject, deletePMProject,
+  getPMTickets, createPMTicket, updatePMTicket, deletePMTicket,
+  getPMTeam, createPMMember, updatePMMember, deletePMMember,
+  getPMActiveProject, setPMActiveProject,
+  ensurePMSeed,
+} from './data.js';
+
+// ============================================================
+// ROUTER
+// ============================================================
+const views = {};
+let currentView = null;
+
+function registerView(id, render) {
+  views[id] = render;
+}
+
+function navigateTo(viewId) {
+  if (window.location.hash !== `#${viewId}`) {
+    window.location.hash = viewId;
+  } else {
+    activateView(viewId);
+  }
+}
+
+function activateView(viewId) {
+  if (!views[viewId]) return;
+  document.querySelectorAll('main [data-view]').forEach(el => el.style.display = 'none');
+  const container = document.querySelector(`main [data-view="${viewId}"]`);
+  if (container) container.style.display = '';
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('nav-active', el.dataset.view === viewId);
+  });
+  currentView = viewId;
+  updateMeta(viewId);
+  views[viewId]();
+}
+
+function initRouter(defaultView) {
+  window.addEventListener('hashchange', () => {
+    const id = window.location.hash.slice(1) || defaultView;
+    activateView(id);
+  });
+  activateView(window.location.hash.slice(1) || defaultView);
+}
+
+// ============================================================
+// MODAL
+// ============================================================
+let modalOverlay, modalBox;
+
+function initModal() {
+  modalOverlay = document.getElementById('modal-overlay');
+  modalBox = document.getElementById('modal-box');
+  modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+}
+
+function openModal({ title, fields, onSubmit, submitLabel = 'CREATE' }) {
+  modalBox.innerHTML = `
+    <div class="modal-header">
+      <div class="display-text modal-title">${title}</div>
+      <button class="modal-close-btn" id="modal-close-btn">&#x2715;</button>
+    </div>
+    <form id="modal-form">
+      ${fields.map(renderField).join('')}
+      <button type="submit" class="modal-submit">${submitLabel}</button>
+    </form>`;
+  document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+  document.getElementById('modal-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.target));
+    onSubmit(data);
+    closeModal();
+  });
+  modalOverlay.classList.add('active');
+  modalBox.querySelector('input, select, textarea')?.focus();
+}
+
+function renderField({ name, label, type = 'text', options, required = true, defaultValue = '' }) {
+  const req = required ? 'required' : '';
+  const defVal = esc(defaultValue);
+  if (type === 'select') {
+    return `<div class="modal-field">
+      <label class="mono-label modal-label">${label}</label>
+      <select name="${name}" ${req} class="modal-input">
+        ${(options || []).map(o => {
+          const val = o.value ?? o;
+          const lbl = o.label ?? o;
+          const sel = String(val) === String(defaultValue) ? 'selected' : '';
+          return `<option value="${esc(val)}" ${sel}>${esc(lbl)}</option>`;
+        }).join('')}
+      </select></div>`;
+  }
+  if (type === 'textarea') {
+    return `<div class="modal-field">
+      <label class="mono-label modal-label">${label}</label>
+      <textarea name="${name}" ${req} class="modal-input modal-textarea" rows="3">${defVal}</textarea></div>`;
+  }
+  return `<div class="modal-field">
+    <label class="mono-label modal-label">${label}</label>
+    <input type="${type}" name="${name}" ${req} class="modal-input" value="${defVal}"></div>`;
+}
+
+function closeModal() { modalOverlay?.classList.remove('active'); }
+
+// ============================================================
+// HELPERS
+// ============================================================
+function esc(str) {
+  return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function fmtStatus(s) { return s.replace('_', '\u00A0'); }
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${m}/${d}/${y.slice(2)}`;
+}
+
+function daysUntil(deadline) {
+  if (!deadline) return null;
+  return Math.ceil((new Date(deadline) - new Date()) / 86400000);
+}
+
+function subjectSlug(s) {
+  return s.toLowerCase().replace(/\s+/g, '-');
+}
+
+function subjectBadge(subject) {
+  return `<span class="subject-badge subj-${subjectSlug(subject)} mono-label">${esc(subject)}</span>`;
+}
+
+function timeAgo(iso) {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function getISOWeek(d = new Date()) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+}
+
+function updateMeta(viewId) {
+  const crumb = document.getElementById('header-breadcrumb');
+  if (crumb && viewId) {
+    crumb.textContent = 'HOME / ' + viewId.toUpperCase().replace(/-/g, ' ');
+  }
+}
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+function renderDashboard() {
+  const container = document.querySelector('main [data-view="dashboard"]');
+  if (!container) return;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(today);
+  weekEnd.setDate(today.getDate() + 7);
+
+  const notDone = tasks.filter(t => t.status !== 'DONE');
+  const overdue = notDone.filter(t => t.deadline && new Date(t.deadline) < today);
+  const thisWeek = notDone.filter(t => {
+    if (!t.deadline) return false;
+    const d = new Date(t.deadline);
+    return d >= today && d <= weekEnd;
+  });
+  const done = tasks.filter(t => t.status === 'DONE');
+
+  // Urgent: overdue or CRITICAL/HIGH due within 7 days
+  const urgent = notDone.filter(t => {
+    if (t.deadline && new Date(t.deadline) < today) return true;
+    if ((t.priority === 'CRITICAL' || t.priority === 'HIGH') && t.deadline) {
+      const d = new Date(t.deadline);
+      return d >= today && d <= weekEnd;
+    }
+    return false;
+  }).sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''));
+
+  // Subject load
+  const subjectLoad = {};
+  SUBJECTS.forEach(s => { subjectLoad[s] = 0; });
+  notDone.forEach(t => { if (t.subject in subjectLoad) subjectLoad[t.subject]++; });
+  const maxLoad = Math.max(1, ...Object.values(subjectLoad));
+
+  // Exam countdown
+  const examDate = new Date('2026-05-05');
+  const daysLeft = Math.ceil((examDate - new Date()) / 86400000);
+
+  container.innerHTML = `
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-value display-text">${tasks.length}</div>
+        <div class="mono-label stat-label">TOTAL</div>
+      </div>
+      <div class="stat-card stat-danger">
+        <div class="stat-value display-text">${overdue.length}</div>
+        <div class="mono-label stat-label">OVERDUE</div>
+      </div>
+      <div class="stat-card stat-review">
+        <div class="stat-value display-text">${thisWeek.length}</div>
+        <div class="mono-label stat-label">THIS WEEK</div>
+      </div>
+      <div class="stat-card stat-done">
+        <div class="stat-value display-text">${done.length}</div>
+        <div class="mono-label stat-label">DONE</div>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <section class="data-section">
+        <div class="section-header display-text">
+          URGENT
+          <span class="tag">ACTION NEEDED</span>
+        </div>
+        <div class="task-list">
+          ${urgent.length ? urgent.map(t => {
+            const days = daysUntil(t.deadline);
+            const overdueCls = days !== null && days < 0 ? 'style="border-left:2px solid var(--status-blocked);padding-left:8px"' : '';
+            const daysLabel = days === null ? '' : days < 0
+              ? `<span class="due-chip" style="color:var(--status-blocked)">${Math.abs(days)}d OVERDUE</span>`
+              : `<span class="due-chip">${days}d LEFT</span>`;
+            return `<div class="task-row" ${overdueCls}>
+              <div class="task-title">${esc(t.title)} ${daysLabel}</div>
+              <div>${subjectBadge(t.subject)}</div>
+              <div class="priority-badge p-${t.priority}">${t.priority}</div>
+              <div class="status-badge s-${t.status}">${fmtStatus(t.status)}</div>
+            </div>`;
+          }).join('') : '<div class="empty-state">All clear — no urgent items.</div>'}
+        </div>
+      </section>
+
+      <section class="data-section">
+        <div class="section-header display-text">
+          SUBJECT LOAD
+          <span class="tag">OPEN TASKS</span>
+        </div>
+        <div>
+          ${SUBJECTS.map(s => {
+            const count = subjectLoad[s];
+            const pct = Math.round((count / maxLoad) * 100);
+            return `<div class="workload-row">
+              <div class="workload-info">
+                <div class="workload-name">${esc(s)}</div>
+                <div class="workload-bar-wrap"><div class="workload-bar" style="width:${pct}%"></div></div>
+              </div>
+              <div class="workload-count">${count}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </section>
+
+      <div class="notice-board">
+        <div class="notice-headline">
+          <span class="filled">IB EXAMS IN</span>
+          <span>${daysLeft}</span>
+          <span>DAYS</span>
+        </div>
+        <div class="notice-footer">
+          <span>IB DIPLOMA — 2025/26</span>
+          <span>${new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// ASSIGNMENTS
+// ============================================================
+let assignmentViewMode = 'table';
+let filterSubject = '', filterStatus = '', filterPriority = '';
+
+function initAssignments() {
+  const container = document.querySelector('main [data-view="assignments"]');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="view-toolbar">
+      <div class="view-toggle">
+        <button id="btn-assign-table" class="toggle-btn view-active">TABLE VIEW</button>
+        <button id="btn-assign-board" class="toggle-btn">BOARD VIEW</button>
+      </div>
+      <div class="filter-bar">
+        <select id="filter-subject" class="filter-select">
+          <option value="">ALL SUBJECTS</option>
+          ${SUBJECTS.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+        </select>
+        <select id="filter-astatus" class="filter-select">
+          <option value="">ALL STATUS</option>
+          ${STATUS.map(s => `<option value="${esc(s)}">${fmtStatus(s)}</option>`).join('')}
+        </select>
+        <select id="filter-apriority" class="filter-select">
+          <option value="">ALL PRIORITY</option>
+          ${PRIORITY.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+        </select>
+      </div>
+      <button id="btn-new-task" class="action-btn">+ NEW TASK</button>
+    </div>
+    <div id="task-table-container"></div>
+    <div id="task-board-container" class="board-container board-5col" style="display:none"></div>`;
+
+  document.getElementById('btn-assign-table').addEventListener('click', () => {
+    assignmentViewMode = 'table'; renderAssignments();
+  });
+  document.getElementById('btn-assign-board').addEventListener('click', () => {
+    assignmentViewMode = 'board'; renderAssignments();
+  });
+  document.getElementById('filter-subject').addEventListener('change', e => { filterSubject = e.target.value; renderAssignments(); });
+  document.getElementById('filter-astatus').addEventListener('change', e => { filterStatus = e.target.value; renderAssignments(); });
+  document.getElementById('filter-apriority').addEventListener('change', e => { filterPriority = e.target.value; renderAssignments(); });
+  document.getElementById('btn-new-task').addEventListener('click', openNewTaskModal);
+}
+
+function filteredTasks() {
+  let list = tasks;
+  if (filterSubject) list = list.filter(t => t.subject === filterSubject);
+  if (filterStatus)  list = list.filter(t => t.status === filterStatus);
+  if (filterPriority) list = list.filter(t => t.priority === filterPriority);
+  return list;
+}
+
+function renderAssignments() {
+  const tableBtn = document.getElementById('btn-assign-table');
+  const boardBtn = document.getElementById('btn-assign-board');
+  if (!tableBtn) return;
+  tableBtn.classList.toggle('view-active', assignmentViewMode === 'table');
+  boardBtn.classList.toggle('view-active', assignmentViewMode === 'board');
+
+  // Sync filter dropdowns
+  const subj = document.getElementById('filter-subject');
+  const stat = document.getElementById('filter-astatus');
+  const pri  = document.getElementById('filter-apriority');
+  if (subj) subj.value = filterSubject;
+  if (stat) stat.value = filterStatus;
+  if (pri)  pri.value  = filterPriority;
+
+  const list = filteredTasks();
+  const tableContainer = document.getElementById('task-table-container');
+  const boardContainer = document.getElementById('task-board-container');
+
+  if (assignmentViewMode === 'table') {
+    tableContainer.style.display = '';
+    boardContainer.style.display = 'none';
+    renderAssignmentTable(list, tableContainer);
+  } else {
+    tableContainer.style.display = 'none';
+    boardContainer.style.display = '';
+    renderAssignmentBoard(list, boardContainer);
+  }
+}
+
+function renderAssignmentTable(list, container) {
+  const cols = '8px 1fr 140px 80px 90px 80px 80px';
+  container.innerHTML = `
+    <div class="task-row table-header" style="grid-template-columns:${cols}">
+      <div></div>
+      <div class="mono-label">TITLE</div>
+      <div class="mono-label">SUBJECT</div>
+      <div class="mono-label">DEADLINE</div>
+      <div class="mono-label">DAYS</div>
+      <div class="mono-label">STATUS</div>
+      <div></div>
+    </div>
+    ${list.length ? list.map(t => {
+      const days = daysUntil(t.deadline);
+      const overdue = days !== null && days < 0;
+      const daysDisplay = days === null ? '—'
+        : overdue ? `<span style="color:var(--status-blocked)">${days}d</span>`
+        : `${days}d`;
+      return `<div class="task-row assign-row" data-id="${t.id}" style="grid-template-columns:${cols}">
+        <div class="priority-dot p-dot-${t.priority}" title="${t.priority}"></div>
+        <div class="task-title">${esc(t.title)}
+          ${t.notes ? `<span class="due-chip" title="${esc(t.notes)}">NOTE</span>` : ''}
+        </div>
+        <div>${subjectBadge(t.subject)}</div>
+        <div class="task-assignee">${fmtDate(t.deadline)}</div>
+        <div class="task-assignee">${daysDisplay}</div>
+        <div class="status-badge s-${t.status}">${fmtStatus(t.status)}</div>
+        <div class="ticket-actions">
+          <button class="edit-btn edit-task-btn" data-id="${t.id}" title="Edit">&#x270E;</button>
+          <button class="edit-btn delete-task-btn" data-id="${t.id}" title="Delete">&#x2715;</button>
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty-state">No tasks match the current filters.</div>'}`;
+
+  container.querySelectorAll('.edit-task-btn').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); openEditTaskModal(btn.dataset.id); });
+  });
+
+  container.querySelectorAll('.delete-task-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (btn.dataset.confirm) {
+        deleteTask(btn.dataset.id);
+        renderAndRefreshDash();
+      } else {
+        btn.dataset.confirm = '1';
+        btn.textContent = 'SURE?';
+        btn.style.color = 'var(--status-blocked)';
+        setTimeout(() => {
+          if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; }
+        }, 3000);
+      }
+    });
+  });
+}
+
+function renderAssignmentBoard(list, container) {
+  const COLS = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
+  container.innerHTML = COLS.map(col => {
+    const colTasks = list.filter(t => t.status === col);
+    return `<div class="board-col">
+      <div class="board-col-header">
+        <span class="status-badge s-${col}">${fmtStatus(col)}</span>
+        <span class="mono-label board-col-count">${colTasks.length}</span>
+      </div>
+      <div class="board-col-cards">
+        ${colTasks.map(t => {
+          const days = daysUntil(t.deadline);
+          const daysChip = days !== null
+            ? `<span class="due-chip" style="${days < 0 ? 'color:var(--status-blocked)' : ''}">${days < 0 ? Math.abs(days) + 'd OVERDUE' : days + 'd LEFT'}</span>`
+            : '';
+          return `<div class="board-card s-border-${t.status}">
+            <div class="card-title-row">
+              <div class="card-title">${esc(t.title)}</div>
+            </div>
+            <div style="margin-bottom:6px">${subjectBadge(t.subject)}</div>
+            <div class="card-meta">
+              <span class="priority-badge p-${t.priority}">${t.priority}</span>
+              ${daysChip}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openNewTaskModal() {
+  openModal({
+    title: 'NEW TASK',
+    fields: [
+      { name: 'title',    label: 'TITLE',    type: 'text',   required: true },
+      { name: 'subject',  label: 'SUBJECT',  type: 'select', options: SUBJECTS.map(s => ({ value: s, label: s })), required: true },
+      { name: 'deadline', label: 'DEADLINE', type: 'date',   required: false },
+      { name: 'priority', label: 'PRIORITY', type: 'select', options: PRIORITY.map(p => ({ value: p, label: p })), required: true },
+      { name: 'status',   label: 'STATUS',   type: 'select', options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true },
+      { name: 'notes',    label: 'NOTES',    type: 'textarea', required: false },
+    ],
+    onSubmit(data) {
+      createTask(data);
+      renderAndRefreshDash();
+    },
+  });
+}
+
+function openEditTaskModal(id) {
+  const t = tasks.find(t => t.id === id);
+  if (!t) return;
+  openModal({
+    title: 'EDIT TASK',
+    submitLabel: 'SAVE',
+    fields: [
+      { name: 'title',    label: 'TITLE',    type: 'text',   required: true, defaultValue: t.title },
+      { name: 'subject',  label: 'SUBJECT',  type: 'select', options: SUBJECTS.map(s => ({ value: s, label: s })), required: true, defaultValue: t.subject },
+      { name: 'deadline', label: 'DEADLINE', type: 'date',   required: false, defaultValue: t.deadline || '' },
+      { name: 'priority', label: 'PRIORITY', type: 'select', options: PRIORITY.map(p => ({ value: p, label: p })), required: true, defaultValue: t.priority },
+      { name: 'status',   label: 'STATUS',   type: 'select', options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true, defaultValue: t.status },
+      { name: 'notes',    label: 'NOTES',    type: 'textarea', required: false, defaultValue: t.notes || '' },
+    ],
+    onSubmit(data) {
+      updateTask(id, data);
+      renderAndRefreshDash();
+    },
+  });
+}
+
+function renderAndRefreshDash() {
+  renderAssignments();
+  const dashView = document.querySelector('main [data-view="dashboard"]');
+  if (dashView && dashView.style.display !== 'none') {
+    renderDashboard();
+  }
+}
+
+// ============================================================
+// EE TRACKER
+// ============================================================
+function renderEETracker() {
+  const container = document.querySelector('main [data-view="ee-tracker"]');
+  if (!container) return;
+
+  const wordCount = ee.wordCount || 0;
+  const pct = Math.min(100, Math.round((wordCount / 4000) * 100));
+  const doneMilestones = ee.milestones.filter(m => m.done).length;
+
+  container.innerHTML = `
+    <div class="section-header display-text" style="margin-bottom:var(--spacing-lg)">
+      EE TRACKER
+      <span class="tag">EXTENDED ESSAY</span>
+    </div>
+
+    <div class="ee-grid">
+      <!-- Word count -->
+      <div class="data-section" style="margin-bottom:var(--spacing-lg)">
+        <div class="mono-label" style="color:#555;margin-bottom:8px">WORD COUNT</div>
+        <div style="display:flex;align-items:center;gap:var(--spacing-md);margin-bottom:12px">
+          <input type="number" id="ee-wordcount" class="modal-input" style="width:120px;font-size:24px;font-family:var(--font-display)"
+            value="${wordCount}" min="0" max="4000">
+          <span class="mono-label" style="color:#555">/ 4000 WORDS</span>
+          <span class="mono-label" style="color:var(--accent)">${pct}%</span>
+        </div>
+        <div class="workload-bar-wrap" style="height:8px;background:#222">
+          <div id="ee-progress-bar" class="workload-bar" style="width:${pct}%;height:100%"></div>
+        </div>
+      </div>
+
+      <!-- Milestones -->
+      <div class="data-section" style="margin-bottom:var(--spacing-lg)">
+        <div class="section-header display-text" style="font-size:24px">
+          MILESTONES
+          <span class="tag">${doneMilestones}/${ee.milestones.length}</span>
+        </div>
+        <div class="task-list">
+          ${ee.milestones.map(m => `
+            <div class="task-row" style="grid-template-columns:24px 1fr">
+              <input type="checkbox" class="ee-milestone-check" data-id="${m.id}" ${m.done ? 'checked' : ''}
+                style="accent-color:var(--accent);width:16px;height:16px;cursor:pointer">
+              <span style="${m.done ? 'text-decoration:line-through;color:#444' : ''}">${esc(m.label)}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      <!-- Meeting log -->
+      <div class="data-section">
+        <div class="section-header display-text" style="font-size:24px">
+          MEETING LOG
+          <button id="btn-add-meeting" class="action-btn" style="font-size:10px">+ ADD</button>
+        </div>
+        <div class="task-list">
+          ${ee.meetings.length ? ee.meetings.map(m => `
+            <div class="task-row" style="grid-template-columns:90px 1fr">
+              <span class="mono-label" style="color:#555">${fmtDate(m.date)}</span>
+              <span style="font-size:13px;color:#aaa">${esc(m.notes)}</span>
+            </div>`).join('')
+          : '<div class="empty-state">No meetings logged yet.</div>'}
+        </div>
+      </div>
+    </div>`;
+
+  // Word count input handler
+  document.getElementById('ee-wordcount').addEventListener('change', e => {
+    const val = parseInt(e.target.value, 10) || 0;
+    updateEE({ wordCount: val });
+    const newPct = Math.min(100, Math.round((val / 4000) * 100));
+    const bar = document.getElementById('ee-progress-bar');
+    if (bar) bar.style.width = newPct + '%';
+  });
+
+  // Milestone checkboxes
+  container.querySelectorAll('.ee-milestone-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const updated = ee.milestones.map(m =>
+        m.id === cb.dataset.id ? { ...m, done: cb.checked } : m
+      );
+      updateEE({ milestones: updated });
+      renderEETracker();
+    });
+  });
+
+  // Add meeting
+  document.getElementById('btn-add-meeting').addEventListener('click', () => {
+    openModal({
+      title: 'ADD MEETING',
+      fields: [
+        { name: 'date',  label: 'DATE',  type: 'date',     required: true },
+        { name: 'notes', label: 'NOTES', type: 'textarea', required: false },
+      ],
+      onSubmit(data) {
+        addMeeting(data);
+        renderEETracker();
+      },
+    });
+  });
+}
+
+// ============================================================
+// SIDE QUESTS
+// ============================================================
+function renderSideQuests() {
+  const container = document.querySelector('main [data-view="side-quests"]');
+  if (!container) return;
+
+  const statusColor = { ACTIVE: 'var(--accent)', PAUSED: '#555', DONE: 'var(--status-done)' };
+
+  container.innerHTML = `
+    <div class="notice-board" style="margin-bottom:var(--spacing-lg)">
+      <div class="notice-headline">
+        <span class="filled">SIDE QUESTS</span>
+        <span>PARALLEL</span>
+        <span>PROGRESS</span>
+      </div>
+      <div class="notice-footer">
+        <span>${projects.filter(p => p.status === 'ACTIVE').length} ACTIVE</span>
+        <span>${projects.length} TOTAL</span>
+      </div>
+    </div>
+
+    <div class="view-toolbar">
+      <div class="section-header display-text" style="border:none;margin:0;font-size:32px">PROJECTS</div>
+      <button id="btn-new-project" class="action-btn">+ NEW PROJECT</button>
+    </div>
+
+    <div class="task-list">
+      <div class="task-row table-header" style="grid-template-columns:8px 1fr 80px 1fr 1fr 64px">
+        <div></div>
+        <div class="mono-label">NAME</div>
+        <div class="mono-label">STATUS</div>
+        <div class="mono-label">LAST ACTION</div>
+        <div class="mono-label">NEXT STEP</div>
+        <div></div>
+      </div>
+      ${projects.length ? projects.map(p => `
+        <div class="task-row assign-row" data-id="${p.id}" style="grid-template-columns:8px 1fr 80px 1fr 1fr 64px">
+          <div class="priority-dot p-dot-${p.priority}" title="${p.priority}"></div>
+          <div class="task-title">${esc(p.name)}</div>
+          <div class="status-badge" style="color:${statusColor[p.status] || '#555'}">${esc(p.status)}</div>
+          <div class="task-assignee">${esc(p.lastAction || '—')}</div>
+          <div class="task-assignee">${esc(p.nextStep || '—')}</div>
+          <div class="ticket-actions">
+            <button class="edit-btn edit-project-btn" data-id="${p.id}" title="Edit">&#x270E;</button>
+            <button class="edit-btn delete-project-btn" data-id="${p.id}" title="Delete">&#x2715;</button>
+          </div>
+        </div>`).join('')
+      : '<div class="empty-state">No projects yet.</div>'}
+    </div>`;
+
+  document.getElementById('btn-new-project').addEventListener('click', () => {
+    openModal({
+      title: 'NEW PROJECT',
+      fields: [
+        { name: 'name',       label: 'NAME',        type: 'text',   required: true },
+        { name: 'status',     label: 'STATUS',      type: 'select', options: SIDE_QUEST_STATUSES, required: true },
+        { name: 'lastAction', label: 'LAST ACTION', type: 'text',   required: false },
+        { name: 'nextStep',   label: 'NEXT STEP',   type: 'text',   required: false },
+        { name: 'priority',   label: 'PRIORITY',    type: 'select', options: PRIORITY, required: true },
+      ],
+      onSubmit(data) { createProject(data); renderSideQuests(); },
+    });
+  });
+
+  container.querySelectorAll('.edit-project-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const p = projects.find(p => p.id === btn.dataset.id);
+      if (!p) return;
+      openModal({
+        title: 'EDIT PROJECT',
+        submitLabel: 'SAVE',
+        fields: [
+          { name: 'name',       label: 'NAME',        type: 'text',   required: true,  defaultValue: p.name },
+          { name: 'status',     label: 'STATUS',      type: 'select', options: SIDE_QUEST_STATUSES, required: true, defaultValue: p.status },
+          { name: 'lastAction', label: 'LAST ACTION', type: 'text',   required: false, defaultValue: p.lastAction || '' },
+          { name: 'nextStep',   label: 'NEXT STEP',   type: 'text',   required: false, defaultValue: p.nextStep || '' },
+          { name: 'priority',   label: 'PRIORITY',    type: 'select', options: PRIORITY, required: true, defaultValue: p.priority },
+        ],
+        onSubmit(data) { updateProject(btn.dataset.id, data); renderSideQuests(); },
+      });
+    });
+  });
+
+  container.querySelectorAll('.delete-project-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (btn.dataset.confirm) {
+        deleteProject(btn.dataset.id);
+        renderSideQuests();
+      } else {
+        btn.dataset.confirm = '1';
+        btn.textContent = 'SURE?';
+        btn.style.color = 'var(--status-blocked)';
+        setTimeout(() => {
+          if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; }
+        }, 3000);
+      }
+    });
+  });
+}
+
+// ============================================================
+// GREEK PORTFOLIO
+// ============================================================
+const expandedTexts = new Set();
+
+function renderGreekPortfolio() {
+  const container = document.querySelector('main [data-view="greek-portfolio"]');
+  if (!container) return;
+
+  const finalCount = greek.texts.filter(t => t.status === 'FINAL').length;
+  const progressPct = Math.round((finalCount / 4) * 100);
+
+  const statusColor = { DRAFT: '#555', REVISED: 'var(--status-review)', FINAL: 'var(--status-done)' };
+
+  container.innerHTML = `
+    <div class="section-header display-text" style="margin-bottom:var(--spacing-lg)">
+      GREEK PORTFOLIO
+      <span class="tag">LANGUAGE B HL</span>
+    </div>
+
+    <!-- Global Issue -->
+    <div class="data-section" style="margin-bottom:var(--spacing-lg)">
+      <div class="mono-label" style="color:#555;margin-bottom:8px">GLOBAL ISSUE</div>
+      <textarea id="greek-global" class="modal-input modal-textarea" rows="2"
+        style="font-size:15px;border:1px solid #2a2a2a;padding:10px;background:#1a1a1a">${esc(greek.globalIssue)}</textarea>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="data-section" style="margin-bottom:var(--spacing-lg)">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <div class="mono-label" style="color:#555">PORTFOLIO PROGRESS</div>
+        <div class="mono-label" style="color:var(--status-done)">${finalCount}/4 FINAL</div>
+      </div>
+      <div class="workload-bar-wrap" style="height:8px;background:#222">
+        <div class="workload-bar" style="width:${progressPct}%;height:100%;background:var(--status-done)"></div>
+      </div>
+    </div>
+
+    <!-- Texts -->
+    <div class="section-header display-text" style="font-size:28px;margin-bottom:var(--spacing-md)">
+      TEXTS
+    </div>
+    <div id="greek-texts-list" class="task-list">
+      ${greek.texts.map(t => {
+        const isExpanded = expandedTexts.has(t.id);
+        return `<div class="task-row greek-text-row" data-id="${t.id}"
+          style="grid-template-columns:1fr 80px 90px 32px;flex-direction:column;height:auto;display:grid;align-items:center">
+          <div class="task-title">${esc(t.title)}</div>
+          <div>
+            ${t.wordCount ? `<span class="due-chip">${t.wordCount}w</span>` : ''}
+          </div>
+          <div class="status-badge" style="color:${statusColor[t.status] || '#555'}">${esc(t.status)}</div>
+          <button class="edit-btn greek-expand-btn" data-id="${t.id}" title="Expand">${isExpanded ? '▲' : '▼'}</button>
+          ${isExpanded ? `<div class="greek-text-detail" data-id="${t.id}"
+            style="grid-column:1/-1;padding:var(--spacing-sm) 0;border-top:1px solid #222;margin-top:8px">
+            <div style="display:flex;gap:var(--spacing-md);margin-bottom:var(--spacing-sm)">
+              <div style="flex:1">
+                <div class="mono-label" style="color:#555;margin-bottom:4px">WORD COUNT</div>
+                <input type="number" class="modal-input greek-wc-input" data-id="${t.id}"
+                  value="${t.wordCount}" min="0" style="width:100px">
+              </div>
+              <div>
+                <div class="mono-label" style="color:#555;margin-bottom:4px">STATUS</div>
+                <select class="filter-select greek-status-select" data-id="${t.id}">
+                  ${GREEK_TEXT_STATUSES.map(s => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="mono-label" style="color:#555;margin-bottom:4px">NOTES</div>
+              <textarea class="modal-input greek-notes-input" data-id="${t.id}" rows="2"
+                style="background:#1a1a1a;border:1px solid #2a2a2a;padding:8px">${esc(t.notes)}</textarea>
+            </div>
+          </div>` : ''}
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  // Global issue auto-save
+  document.getElementById('greek-global').addEventListener('blur', e => {
+    updateGreek({ globalIssue: e.target.value });
+  });
+
+  // Expand/collapse
+  container.querySelectorAll('.greek-expand-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      if (expandedTexts.has(id)) { expandedTexts.delete(id); } else { expandedTexts.add(id); }
+      renderGreekPortfolio();
+    });
+  });
+
+  // Word count inputs
+  container.querySelectorAll('.greek-wc-input').forEach(input => {
+    input.addEventListener('change', e => {
+      updateGreekText(e.target.dataset.id, { wordCount: parseInt(e.target.value, 10) || 0 });
+      renderGreekPortfolio();
+    });
+  });
+
+  // Status selects
+  container.querySelectorAll('.greek-status-select').forEach(sel => {
+    sel.addEventListener('change', e => {
+      updateGreekText(e.target.dataset.id, { status: e.target.value });
+      renderGreekPortfolio();
+    });
+  });
+
+  // Notes textareas
+  container.querySelectorAll('.greek-notes-input').forEach(ta => {
+    ta.addEventListener('blur', e => {
+      updateGreekText(e.target.dataset.id, { notes: e.target.value });
+    });
+  });
+}
+
+// ============================================================
+// DEV PM VIEW
+// ============================================================
+const PM_STATUS_CYCLE = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
+const PM_BOARD_COLS   = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
+let pmSubView    = 'projects';
+let pmTicketMode = 'table';
+let pmFilterAssignee = '', pmFilterPriority = '', pmFilterStatus = '';
+
+function initPM() {
+  ensurePMSeed();
+}
+
+function renderPM() {
+  const container = document.querySelector('main [data-view="dev-pm"]');
+  if (!container) return;
+
+  const activeId = getPMActiveProject();
+  const proj = getPMProjects().find(p => p.id === activeId);
+
+  container.innerHTML = `
+    <div class="view-toolbar" style="margin-bottom:0">
+      <div class="view-toggle">
+        <button class="toggle-btn pm-tab ${pmSubView === 'projects' ? 'view-active' : ''}" data-tab="projects">PROJECTS</button>
+        <button class="toggle-btn pm-tab ${pmSubView === 'tickets' ? 'view-active' : ''}" data-tab="tickets">TICKETS</button>
+        <button class="toggle-btn pm-tab ${pmSubView === 'team' ? 'view-active' : ''}" data-tab="team">TEAM</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--spacing-sm)">
+        ${proj ? `<span class="mono-label" style="color:#555">ACTIVE: <span style="color:var(--accent)">${esc(proj.name)}</span></span>` : ''}
+        <button id="btn-pm-new" class="action-btn">+ NEW ${pmSubView === 'projects' ? 'PROJECT' : pmSubView === 'tickets' ? 'TICKET' : 'MEMBER'}</button>
+      </div>
+    </div>
+    <div id="pm-content" style="margin-top:var(--spacing-md)"></div>`;
+
+  container.querySelectorAll('.pm-tab').forEach(btn => {
+    btn.addEventListener('click', () => { pmSubView = btn.dataset.tab; renderPM(); });
+  });
+
+  document.getElementById('btn-pm-new').addEventListener('click', () => {
+    if (pmSubView === 'projects') openNewPMProjectModal();
+    else if (pmSubView === 'tickets') openNewPMTicketModal();
+    else openNewPMMemberModal();
+  });
+
+  const content = document.getElementById('pm-content');
+  if (pmSubView === 'projects') renderPMProjects(content);
+  else if (pmSubView === 'tickets') renderPMTickets(content);
+  else renderPMTeam(content);
+}
+
+// PM PROJECTS
+function renderPMProjects(container) {
+  const pmProjects = getPMProjects();
+  const allTickets = getPMTickets();
+  const activeId   = getPMActiveProject();
+
+  container.innerHTML = `
+    <div class="section-header display-text" style="font-size:32px;margin-bottom:var(--spacing-md)">PROJECTS</div>
+    <div class="project-grid">
+      ${pmProjects.map(p => {
+        const tickets = allTickets.filter(t => t.projectId === p.id);
+        const open    = tickets.filter(t => t.status !== 'DONE').length;
+        const isActive = p.id === activeId;
+        const updated  = tickets.reduce((l, t) => t.updatedAt > l ? t.updatedAt : l, p.createdAt);
+        return `<div class="project-card ${isActive ? 'project-active' : ''}" data-id="${p.id}">
+          <div class="project-phase-bar">
+            <span class="phase-badge phase-${p.phase}">${p.phase}</span>
+            ${isActive ? '<span class="active-badge">ACTIVE</span>' : ''}
+          </div>
+          <div class="project-name display-text">${esc(p.name)}</div>
+          <div class="project-desc">${esc(p.description)}</div>
+          <div class="project-meta">
+            <div class="project-stats">
+              <span class="mono-label">${open} OPEN</span>
+              <span class="mono-label" style="color:#444">/ ${tickets.length} TOTAL</span>
+            </div>
+            <span class="mono-label" style="color:#444">${timeAgo(updated)}</span>
+          </div>
+          <div class="project-card-actions">
+            <button class="set-active-btn mono-label pm-set-active" data-id="${p.id}">
+              ${isActive ? '&#x2713; ACTIVE' : 'SET ACTIVE &#x2192;'}
+            </button>
+            <div class="project-action-btns">
+              <button class="edit-btn pm-edit-proj" data-id="${p.id}">&#x270E; EDIT</button>
+              <button class="edit-btn pm-del-proj" data-id="${p.id}" data-count="${tickets.length}">&#x2715; DELETE</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('') || '<div class="empty-state" style="grid-column:1/-1">No projects yet.</div>'}
+    </div>`;
+
+  container.querySelectorAll('.pm-set-active').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); setPMActiveProject(btn.dataset.id); renderPM(); });
+  });
+  container.querySelectorAll('.project-card').forEach(card => {
+    card.addEventListener('click', () => { setPMActiveProject(card.dataset.id); pmSubView = 'tickets'; renderPM(); });
+  });
+  container.querySelectorAll('.pm-edit-proj').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const p = getPMProjects().find(p => p.id === btn.dataset.id);
+      if (!p) return;
+      openModal({
+        title: 'EDIT PROJECT', submitLabel: 'SAVE',
+        fields: [
+          { name: 'name',        label: 'PROJECT NAME', defaultValue: p.name },
+          { name: 'phase',       label: 'PHASE', type: 'select', defaultValue: p.phase, options: ['ALPHA', 'BETA', 'LAUNCH', 'MAINTENANCE'] },
+          { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false, defaultValue: p.description },
+        ],
+        onSubmit(data) { updatePMProject(btn.dataset.id, data); renderPM(); },
+      });
+    });
+  });
+  container.querySelectorAll('.pm-del-proj').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (btn.dataset.confirm) {
+        const id = btn.dataset.id;
+        deletePMProject(id);
+        if (getPMActiveProject() === id) {
+          const remaining = getPMProjects();
+          setPMActiveProject(remaining[0]?.id ?? null);
+        }
+        renderPM();
+      } else {
+        btn.dataset.confirm = '1';
+        const n = btn.dataset.count;
+        btn.textContent = `DELETE (${n} ticket${n == 1 ? '' : 's'})?`;
+        btn.style.color = 'var(--status-blocked)';
+        setTimeout(() => { if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715; DELETE'; btn.style.color = ''; } }, 3000);
+      }
+    });
+  });
+}
+
+function openNewPMProjectModal() {
+  openModal({
+    title: 'NEW PROJECT',
+    fields: [
+      { name: 'name',        label: 'PROJECT NAME' },
+      { name: 'phase',       label: 'PHASE', type: 'select', options: ['ALPHA', 'BETA', 'LAUNCH', 'MAINTENANCE'] },
+      { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false },
+    ],
+    onSubmit(data) { createPMProject(data); renderPM(); },
+  });
+}
+
+// PM TICKETS
+function renderPMTickets(container) {
+  const activeId = getPMActiveProject();
+  let tickets = getPMTickets().filter(t => t.projectId === activeId);
+  if (pmFilterAssignee) tickets = tickets.filter(t => t.assignee === pmFilterAssignee);
+  if (pmFilterPriority) tickets = tickets.filter(t => t.priority === pmFilterPriority);
+  if (pmFilterStatus)   tickets = tickets.filter(t => t.status === pmFilterStatus);
+
+  const team = getPMTeam();
+
+  container.innerHTML = `
+    <div class="view-toolbar" style="margin-bottom:var(--spacing-md)">
+      <div class="view-toggle">
+        <button id="pm-btn-table" class="toggle-btn ${pmTicketMode === 'table' ? 'view-active' : ''}">TABLE VIEW</button>
+        <button id="pm-btn-board" class="toggle-btn ${pmTicketMode === 'board' ? 'view-active' : ''}">BOARD VIEW</button>
+      </div>
+      <div class="filter-bar">
+        <select id="pm-filter-assignee" class="filter-select">
+          <option value="">ALL ASSIGNEES</option>
+          ${team.map(m => `<option value="${esc(m.name)}" ${pmFilterAssignee === m.name ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
+        </select>
+        <select id="pm-filter-priority" class="filter-select">
+          <option value="">ALL PRIORITIES</option>
+          ${['CRITICAL','HIGH','NORMAL','LOW'].map(p => `<option value="${p}" ${pmFilterPriority === p ? 'selected' : ''}>${p}</option>`).join('')}
+        </select>
+        <select id="pm-filter-status" class="filter-select">
+          <option value="">ALL STATUSES</option>
+          ${['TODO','IN_PROGRESS','REVIEW','DONE','BLOCKED'].map(s => `<option value="${s}" ${pmFilterStatus === s ? 'selected' : ''}>${fmtStatus(s)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="pm-ticket-table" class="task-list" ${pmTicketMode === 'board' ? 'style="display:none"' : ''}></div>
+    <div id="pm-ticket-board" class="board-container board-5col" ${pmTicketMode === 'table' ? 'style="display:none"' : ''}></div>`;
+
+  document.getElementById('pm-btn-table').addEventListener('click', () => { pmTicketMode = 'table'; renderPM(); });
+  document.getElementById('pm-btn-board').addEventListener('click', () => { pmTicketMode = 'board'; renderPM(); });
+  document.getElementById('pm-filter-assignee').addEventListener('change', e => { pmFilterAssignee = e.target.value; renderPM(); });
+  document.getElementById('pm-filter-priority').addEventListener('change', e => { pmFilterPriority = e.target.value; renderPM(); });
+  document.getElementById('pm-filter-status').addEventListener('change', e => { pmFilterStatus = e.target.value; renderPM(); });
+
+  if (pmTicketMode === 'table') {
+    renderPMTicketTable(tickets, document.getElementById('pm-ticket-table'));
+  } else {
+    renderPMTicketBoard(tickets, document.getElementById('pm-ticket-board'));
+  }
+}
+
+function renderPMTicketTable(tickets, el) {
+  const cols = '1fr 120px 80px 100px 72px';
+  el.innerHTML = `
+    <div class="task-row table-header" style="grid-template-columns:${cols}">
+      <div class="mono-label">TITLE</div>
+      <div class="mono-label">ASSIGNEE</div>
+      <div class="mono-label">PRIORITY</div>
+      <div class="mono-label" style="text-align:right">STATUS</div>
+      <div></div>
+    </div>
+    ${tickets.length ? tickets.map(t => `
+      <div class="task-row ticket-row" style="grid-template-columns:${cols}">
+        <div class="task-title">
+          ${esc(t.title)}
+          ${t.dueDate ? `<span class="due-chip">DUE ${fmtDate(t.dueDate)}</span>` : ''}
+        </div>
+        <div class="task-assignee">${esc(t.assignee || '—')}</div>
+        <div class="priority-badge p-${t.priority}">${t.priority}</div>
+        <div class="status-badge s-${t.status} clickable-pm-status" data-id="${t.id}" title="Click to cycle status">${fmtStatus(t.status)}</div>
+        <div class="ticket-actions">
+          <button class="edit-btn pm-edit-ticket" data-id="${t.id}" title="Edit">&#x270E;</button>
+          <button class="edit-btn pm-del-ticket" data-id="${t.id}" title="Delete">&#x2715;</button>
+        </div>
+      </div>`).join('')
+    : '<div class="empty-state">No tickets match the current filters.</div>'}`;
+
+  el.querySelectorAll('.clickable-pm-status').forEach(badge => {
+    badge.addEventListener('click', e => {
+      e.stopPropagation();
+      const t = getPMTickets().find(t => t.id === badge.dataset.id);
+      if (!t) return;
+      const next = PM_STATUS_CYCLE[(PM_STATUS_CYCLE.indexOf(t.status) + 1) % PM_STATUS_CYCLE.length];
+      updatePMTicket(badge.dataset.id, { status: next });
+      renderPM();
+    });
+  });
+  el.querySelectorAll('.pm-edit-ticket').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); openEditPMTicketModal(btn.dataset.id); });
+  });
+  el.querySelectorAll('.pm-del-ticket').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (btn.dataset.confirm) {
+        deletePMTicket(btn.dataset.id);
+        renderPM();
+      } else {
+        btn.dataset.confirm = '1';
+        btn.textContent = 'SURE?';
+        btn.style.color = 'var(--status-blocked)';
+        setTimeout(() => { if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; } }, 3000);
+      }
+    });
+  });
+}
+
+function renderPMTicketBoard(tickets, el) {
+  el.innerHTML = PM_BOARD_COLS.map(col => {
+    const colTickets = col === 'TODO'
+      ? tickets.filter(t => t.status === col || t.status === 'BLOCKED')
+      : tickets.filter(t => t.status === col);
+    return `<div class="board-col">
+      <div class="board-col-header">
+        <span class="status-badge s-${col}">${fmtStatus(col)}</span>
+        <span class="mono-label board-col-count">${colTickets.length}</span>
+      </div>
+      <div class="board-col-cards pm-drop-zone" data-col="${col}">
+        ${colTickets.map(t => `
+          <div class="board-card s-border-${t.status}" draggable="true" data-id="${t.id}">
+            <div class="card-title-row">
+              <div class="card-title">${esc(t.title)}</div>
+              <button class="edit-btn pm-card-edit" data-id="${t.id}" title="Edit">&#x270E;</button>
+            </div>
+            ${t.description ? `<div class="card-desc">${esc(t.description.length > 60 ? t.description.slice(0, 60) + '\u2026' : t.description)}</div>` : ''}
+            <div class="card-meta">
+              <span class="priority-badge p-${t.priority}">${t.priority}</span>
+              <span class="card-assignee">${esc(t.assignee || '—')}</span>
+            </div>
+            ${t.dueDate ? `<div class="due-chip" style="margin-top:6px">DUE ${fmtDate(t.dueDate)}</div>` : ''}
+            ${t.status === 'BLOCKED' ? '<div class="card-blocked-badge">BLOCKED</div>' : ''}
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('.board-card[draggable]').forEach(card => {
+    card.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', card.dataset.id); card.classList.add('dragging'); });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  });
+  el.querySelectorAll('.pm-drop-zone').forEach(zone => {
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      const id = e.dataTransfer.getData('text/plain');
+      updatePMTicket(id, { status: zone.dataset.col });
+      renderPM();
+    });
+  });
+  el.querySelectorAll('.pm-card-edit').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); openEditPMTicketModal(btn.dataset.id); });
+  });
+}
+
+function openNewPMTicketModal() {
+  const team = getPMTeam();
+  openModal({
+    title: 'NEW TICKET',
+    fields: [
+      { name: 'title',       label: 'TITLE' },
+      { name: 'assignee',    label: 'ASSIGNEE', type: 'select', required: false,
+        options: [{ value: '', label: '— None —' }, ...team.map(m => ({ value: m.name, label: m.name }))] },
+      { name: 'priority',    label: 'PRIORITY', type: 'select', options: ['CRITICAL', 'HIGH', 'NORMAL', 'LOW'] },
+      { name: 'status',      label: 'STATUS', type: 'select', options: ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'] },
+      { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false },
+      { name: 'dueDate',     label: 'DUE DATE', type: 'date', required: false },
+    ],
+    onSubmit(data) { createPMTicket({ ...data, projectId: getPMActiveProject() }); renderPM(); },
+  });
+}
+
+function openEditPMTicketModal(id) {
+  const t = getPMTickets().find(t => t.id === id);
+  if (!t) return;
+  const team = getPMTeam();
+  openModal({
+    title: 'EDIT TICKET', submitLabel: 'SAVE',
+    fields: [
+      { name: 'title',       label: 'TITLE', defaultValue: t.title },
+      { name: 'assignee',    label: 'ASSIGNEE', type: 'select', required: false, defaultValue: t.assignee,
+        options: [{ value: '', label: '— None —' }, ...team.map(m => ({ value: m.name, label: m.name }))] },
+      { name: 'priority',    label: 'PRIORITY', type: 'select', defaultValue: t.priority, options: ['CRITICAL', 'HIGH', 'NORMAL', 'LOW'] },
+      { name: 'status',      label: 'STATUS', type: 'select', defaultValue: t.status, options: ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'] },
+      { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false, defaultValue: t.description || '' },
+      { name: 'dueDate',     label: 'DUE DATE', type: 'date', required: false, defaultValue: t.dueDate || '' },
+    ],
+    onSubmit(data) { updatePMTicket(id, data); renderPM(); },
+  });
+}
+
+// PM TEAM
+function renderPMTeam(container) {
+  const team      = getPMTeam();
+  const activeId  = getPMActiveProject();
+  const tickets   = getPMTickets().filter(t => t.projectId === activeId);
+
+  container.innerHTML = `
+    <div class="section-header display-text" style="font-size:32px;margin-bottom:var(--spacing-md)">TEAM</div>
+    <div class="team-list">
+      ${team.map(m => {
+        const myTickets = tickets.filter(t => t.assignee === m.name);
+        const open      = myTickets.filter(t => t.status !== 'DONE').length;
+        const blocked   = myTickets.filter(t => t.status === 'BLOCKED').length;
+        return `<div class="team-row ${blocked > 0 ? 'has-blocked' : ''}">
+          <div class="member-circle-lg ${blocked > 0 ? 'has-blocked' : ''}">${esc(m.initials)}</div>
+          <div class="member-info">
+            <div class="member-name">${esc(m.name)}</div>
+            <div class="member-role mono-label">${esc(m.role)}</div>
+          </div>
+          <div class="member-stats">
+            <span class="mono-label">${open} OPEN</span>
+            ${blocked > 0 ? `<span class="status-badge s-BLOCKED">${blocked} BLOCKED</span>` : ''}
+          </div>
+          <div class="member-actions">
+            <button class="edit-btn pm-edit-member" data-id="${m.id}" title="Edit">&#x270E;</button>
+            <button class="delete-member-btn pm-del-member" data-id="${m.id}" title="Remove">&#x2715;</button>
+          </div>
+        </div>`;
+      }).join('') || '<div class="empty-state">No team members yet.</div>'}
+    </div>`;
+
+  container.querySelectorAll('.pm-edit-member').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const m = getPMTeam().find(m => m.id === btn.dataset.id);
+      if (!m) return;
+      openModal({
+        title: 'EDIT MEMBER', submitLabel: 'SAVE',
+        fields: [
+          { name: 'name',     label: 'FULL NAME', defaultValue: m.name },
+          { name: 'initials', label: 'INITIALS (2 chars)', defaultValue: m.initials },
+          { name: 'role',     label: 'ROLE', type: 'select', defaultValue: m.role, options: ['Frontend', 'Backend', 'Design', 'DevOps', 'PM'] },
+        ],
+        onSubmit(data) { updatePMMember(btn.dataset.id, data); renderPM(); },
+      });
+    });
+  });
+  container.querySelectorAll('.pm-del-member').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.confirm) {
+        deletePMMember(btn.dataset.id);
+        renderPM();
+      } else {
+        btn.dataset.confirm = '1';
+        btn.textContent = 'SURE?';
+        btn.style.color = 'var(--status-blocked)';
+        setTimeout(() => { if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; } }, 3000);
+      }
+    });
+  });
+}
+
+function openNewPMMemberModal() {
+  openModal({
+    title: 'NEW MEMBER',
+    fields: [
+      { name: 'name',     label: 'FULL NAME' },
+      { name: 'initials', label: 'INITIALS (2 chars)' },
+      { name: 'role',     label: 'ROLE', type: 'select', options: ['Frontend', 'Backend', 'Design', 'DevOps', 'PM'] },
+    ],
+    onSubmit(data) { createPMMember(data); renderPM(); },
+  });
+}
+
+// ============================================================
+// BOOT
+// ============================================================
+initModal();
+initAssignments();
+initPM();
+
+registerView('dashboard',       renderDashboard);
+registerView('assignments',     renderAssignments);
+registerView('ee-tracker',      renderEETracker);
+registerView('side-quests',     renderSideQuests);
+registerView('greek-portfolio', renderGreekPortfolio);
+registerView('dev-pm',          renderPM);
+
+// Nav click handlers
+document.querySelectorAll('.nav-item[data-view]').forEach(item => {
+  item.addEventListener('click', () => navigateTo(item.dataset.view));
+});
+
+// Meta-grid: week + date
+document.getElementById('meta-sprint').textContent = 'W' + getISOWeek();
+document.getElementById('meta-date').textContent =
+  new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+initRouter('dashboard');
