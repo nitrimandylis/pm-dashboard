@@ -884,8 +884,8 @@ async function syncWithNotion() {
         // Exists locally — last-write-wins on updatedAt
         const remoteTime = new Date(page.last_edited_time);
         const localTime  = new Date(local.updatedAt);
-        if (remoteTime > localTime) {
-          // Notion is newer: update local
+        if (remoteTime >= localTime) {
+          // Notion is newer (or equal): update local, no push needed
           updated = updated.map(t =>
             t.id === local.id ? { ...t, ...remote, id: t.id, createdAt: t.createdAt } : t
           );
@@ -920,7 +920,7 @@ async function syncWithNotion() {
     renderAndRefreshDash();
   } catch (err) {
     console.error('Notion sync failed:', err);
-    setSyncStatus('error', err.message.slice(0, 40));
+    setSyncStatus('error', err.message);
   }
 }
 

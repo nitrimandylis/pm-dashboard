@@ -24,7 +24,7 @@ export async function fetchAllNotionTasks() {
   const pages = [];
   let cursor;
   do {
-    const body = { page_size: 100, filter: { property: 'Source', select: { does_not_equal: 'ManageBac' } } };
+    const body = { page_size: 100 };
     if (cursor) body.start_cursor = cursor;
     const data = await notionReq(`/databases/${DB_ID}/query`, 'POST', body);
     pages.push(...data.results);
@@ -38,13 +38,13 @@ export async function fetchAllNotionTasks() {
 export async function createNotionTask(task) {
   return notionReq('/pages', 'POST', {
     parent: { database_id: DB_ID },
-    properties: toNotionProps(task),
+    properties: toNotionProps(task, true),
   });
 }
 
 export async function updateNotionTask(notionId, task) {
   return notionReq(`/pages/${notionId}`, 'PATCH', {
-    properties: toNotionProps(task),
+    properties: toNotionProps(task, false),
   });
 }
 
@@ -54,17 +54,19 @@ export async function archiveNotionTask(notionId) {
 
 // ── Field mapping: dashboard → Notion ────────────────────────────────────
 
-function toNotionProps(task) {
-  return {
+function toNotionProps(task, isCreate = false) {
+  const props = {
     Task:     { title: [{ text: { content: task.title || '' } }] },
-    Subject:  { select: task.subject ? { name: task.subject } : null },
     Due:      { date: task.deadline  ? { start: task.deadline } : null },
     Priority: { select: priorityOut(task.priority) },
     Status:   { select: statusOut(task.status) },
-    Type:     { select: task.type    ? { name: task.type }    : null },
     Notes:    { rich_text: [{ text: { content: task.notes || '' } }] },
-    Source:   { select: { name: 'Manual' } },
   };
+  // Notion rejects null selects — only include optional selects when they have a value
+  if (task.subject) props.Subject = { select: { name: task.subject } };
+  if (task.type)    props.Type    = { select: { name: task.type } };
+  if (isCreate)     props.Source  = { select: { name: 'PM-dashboard' } };
+  return props;
 }
 
 // ── Field mapping: Notion → dashboard ────────────────────────────────────
