@@ -858,13 +858,15 @@ button { font-family: var(--font-body); }
   text-transform: uppercase;
   white-space: nowrap;
 }
-.subj-math-hl    { background: #2D4A8A; color: #fff; }
-.subj-english-hl { background: #4A2D8A; color: #fff; }
-.subj-greek-b-hl { background: #2D8A4A; color: #fff; }
-.subj-history-hl { background: #8A4A2D; color: #fff; }
-.subj-biology-sl { background: #2D8A8A; color: #fff; }
-.subj-film-sl    { background: #8A2D8A; color: #fff; }
-.subj-tok        { background: #555;    color: #fff; }
+/* Subjects match Notion Assignments DB */
+.subj-cs-hl            { background: #1a6b8a; color: #fff; }
+.subj-math-aa-hl       { background: #2D4A8A; color: #fff; }
+.subj-english-b-hl     { background: #4A2D8A; color: #fff; }
+.subj-business-sl      { background: #8A6A2D; color: #fff; }
+.subj-modern-greek-sl  { background: #2D8A4A; color: #fff; }
+.subj-global-politics-sl { background: #8A4A2D; color: #fff; }
+.subj-tok              { background: #555;    color: #fff; }
+.subj-other            { background: #333;    color: #888; }
 
 /* Priority dots (small colored circles for table rows) */
 .priority-dot {

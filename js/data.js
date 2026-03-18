@@ -12,12 +12,15 @@ function now() { return new Date().toISOString(); }
 // ============================================================
 // CONSTANTS
 // ============================================================
+// Subjects match Notion Assignments database
 export const SUBJECTS = [
-  'MATH HL', 'ENGLISH HL', 'GREEK B HL', 'HISTORY HL', 'BIOLOGY SL', 'FILM SL', 'TOK'
+  'CS HL', 'Math AA HL', 'English B HL', 'Business SL',
+  'Modern Greek SL', 'Global Politics SL', 'TOK', 'Other'
 ];
 
-export const STATUS   = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
-export const PRIORITY = ['CRITICAL', 'HIGH', 'NORMAL', 'LOW'];
+export const STATUS     = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
+export const PRIORITY   = ['CRITICAL', 'HIGH', 'NORMAL', 'LOW'];
+export const TASK_TYPES = ['Homework', 'IA', 'Assessment', 'Exam Prep', 'Project', 'Revision'];
 
 export const SIDE_QUEST_STATUSES = ['ACTIVE', 'PAUSED', 'DONE'];
 export const GREEK_TEXT_STATUSES = ['DRAFT', 'REVISED', 'FINAL'];
@@ -26,20 +29,20 @@ export const GREEK_TEXT_STATUSES = ['DRAFT', 'REVISED', 'FINAL'];
 // SEED DATA
 // ============================================================
 const SEED_TASKS = [
-  { id: 'task_01', title: 'Calculus HL Paper 3 practice', subject: 'MATH HL', deadline: '2026-04-10', priority: 'CRITICAL', status: 'IN_PROGRESS', notes: '' },
-  { id: 'task_02', title: 'Comparative essay — La Haine / Γκιακ', subject: 'GREEK B HL', deadline: '2026-03-28', priority: 'HIGH', status: 'TODO', notes: '' },
-  { id: 'task_03', title: 'Cold War essay first draft', subject: 'HISTORY HL', deadline: '2026-03-21', priority: 'HIGH', status: 'IN_PROGRESS', notes: 'Focus on 1947–1953' },
-  { id: 'task_04', title: 'Individual oral recording', subject: 'ENGLISH HL', deadline: '2026-04-03', priority: 'HIGH', status: 'TODO', notes: '' },
-  { id: 'task_05', title: 'Cell biology revision notes', subject: 'BIOLOGY SL', deadline: '2026-04-15', priority: 'NORMAL', status: 'TODO', notes: '' },
-  { id: 'task_06', title: 'Film portfolio — director statement', subject: 'FILM SL', deadline: '2026-03-25', priority: 'HIGH', status: 'REVIEW', notes: '' },
-  { id: 'task_07', title: 'TOK exhibition draft', subject: 'TOK', deadline: '2026-03-31', priority: 'CRITICAL', status: 'TODO', notes: 'Choose 3 objects' },
-  { id: 'task_08', title: 'Integration by parts problem set', subject: 'MATH HL', deadline: '2026-03-20', priority: 'NORMAL', status: 'DONE', notes: '' },
-  { id: 'task_09', title: 'EE second draft', subject: 'HISTORY HL', deadline: '2026-03-24', priority: 'CRITICAL', status: 'IN_PROGRESS', notes: 'Target 3800 words' },
-  { id: 'task_10', title: 'Greek oral presentation prep', subject: 'GREEK B HL', deadline: '2026-04-08', priority: 'HIGH', status: 'TODO', notes: '' },
-  { id: 'task_11', title: 'Genetics IA data analysis', subject: 'BIOLOGY SL', deadline: '2026-03-26', priority: 'HIGH', status: 'BLOCKED', notes: 'Waiting for lab results' },
-  { id: 'task_12', title: 'Film movements essay', subject: 'FILM SL', deadline: '2026-04-20', priority: 'NORMAL', status: 'TODO', notes: '' },
-  { id: 'task_13', title: 'TOK essay outline', subject: 'TOK', deadline: '2026-04-01', priority: 'HIGH', status: 'TODO', notes: '' },
-  { id: 'task_14', title: 'English HL Paper 1 practice', subject: 'ENGLISH HL', deadline: '2026-04-22', priority: 'NORMAL', status: 'TODO', notes: '' },
+  { id: 'task_01', title: 'Calculus AA HL Paper 3 practice', subject: 'Math AA HL', deadline: '2026-04-10', priority: 'CRITICAL', status: 'IN_PROGRESS', type: 'Exam Prep', notes: '', notionId: '' },
+  { id: 'task_02', title: 'Comparative essay — La Haine', subject: 'Modern Greek SL', deadline: '2026-03-28', priority: 'HIGH', status: 'TODO', type: 'Homework', notes: '', notionId: '' },
+  { id: 'task_03', title: 'Cold War essay first draft', subject: 'Global Politics SL', deadline: '2026-03-21', priority: 'HIGH', status: 'IN_PROGRESS', type: 'IA', notes: 'Focus on 1947–1953', notionId: '' },
+  { id: 'task_04', title: 'Individual oral recording', subject: 'English B HL', deadline: '2026-04-03', priority: 'HIGH', status: 'TODO', type: 'Assessment', notes: '', notionId: '' },
+  { id: 'task_05', title: 'Business IA data analysis', subject: 'Business SL', deadline: '2026-04-15', priority: 'NORMAL', status: 'TODO', type: 'IA', notes: '', notionId: '' },
+  { id: 'task_06', title: 'CS HL dossier section 2', subject: 'CS HL', deadline: '2026-03-25', priority: 'HIGH', status: 'REVIEW', type: 'Project', notes: '', notionId: '' },
+  { id: 'task_07', title: 'TOK exhibition draft', subject: 'TOK', deadline: '2026-03-31', priority: 'CRITICAL', status: 'TODO', type: 'Assessment', notes: 'Choose 3 objects', notionId: '' },
+  { id: 'task_08', title: 'Integration by parts problem set', subject: 'Math AA HL', deadline: '2026-03-20', priority: 'NORMAL', status: 'DONE', type: 'Homework', notes: '', notionId: '' },
+  { id: 'task_09', title: 'EE second draft', subject: 'Global Politics SL', deadline: '2026-03-24', priority: 'CRITICAL', status: 'IN_PROGRESS', type: 'IA', notes: 'Target 3800 words', notionId: '' },
+  { id: 'task_10', title: 'Greek oral presentation prep', subject: 'Modern Greek SL', deadline: '2026-04-08', priority: 'HIGH', status: 'TODO', type: 'Assessment', notes: '', notionId: '' },
+  { id: 'task_11', title: 'CS HL IA criterion D', subject: 'CS HL', deadline: '2026-03-26', priority: 'HIGH', status: 'BLOCKED', type: 'IA', notes: 'Waiting for supervisor feedback', notionId: '' },
+  { id: 'task_12', title: 'Business SL mock exam revision', subject: 'Business SL', deadline: '2026-04-20', priority: 'NORMAL', status: 'TODO', type: 'Revision', notes: '', notionId: '' },
+  { id: 'task_13', title: 'TOK essay outline', subject: 'TOK', deadline: '2026-04-01', priority: 'HIGH', status: 'TODO', type: 'Homework', notes: '', notionId: '' },
+  { id: 'task_14', title: 'English B HL Paper 1 practice', subject: 'English B HL', deadline: '2026-04-22', priority: 'NORMAL', status: 'TODO', type: 'Exam Prep', notes: '', notionId: '' },
 ];
 
 const SEED_PROJECTS = [
@@ -127,6 +130,14 @@ export function deleteTask(id) {
   tasks = tasks.filter(t => t.id !== id);
   saveData('tasks', tasks);
 }
+
+// Bulk-replace tasks (used by Notion sync)
+export function setTasks(newTasks) {
+  tasks = newTasks;
+  saveData('tasks', tasks);
+}
+
+export function generateId(prefix) { return uid(prefix); }
 
 // ============================================================
 // PROJECT CRUD

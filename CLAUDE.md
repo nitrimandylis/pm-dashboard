@@ -4,13 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Running the App
 
-Serve with a local HTTP server — ES modules require HTTP, not `file://`:
+Run with the bun server (required for ES modules and Notion API proxy):
 
 ```
-bunx serve . -p 8080
+cp .env.example .env        # first time only
+# edit .env — add your NOTION_API_KEY
+bun server.js
 ```
 
-Then open `http://localhost:8080` in a browser. **Do not open `index.html` directly** — ES module imports are blocked on `file://` URLs by browser CORS policy.
+Open `http://localhost:8080`. **Do not open `index.html` directly** — ES modules require HTTP, and the Notion sync requires the proxy in `server.js`.
+
+The server proxies `/api/notion/*` → `https://api.notion.com/v1/*` using the key from `.env`. The key never reaches the browser.
 
 ## Architecture
 

@@ -2,8 +2,8 @@
 // IMPORTS
 // ============================================================
 import {
-  SUBJECTS, STATUS, PRIORITY, SIDE_QUEST_STATUSES, GREEK_TEXT_STATUSES,
-  tasks, createTask, updateTask, deleteTask,
+  SUBJECTS, STATUS, PRIORITY, TASK_TYPES, SIDE_QUEST_STATUSES, GREEK_TEXT_STATUSES,
+  tasks, createTask, updateTask, deleteTask, setTasks, generateId,
   projects, createProject, updateProject, deleteProject,
   ee, updateEE, addMeeting,
   greek, updateGreek, updateGreekText,
@@ -14,6 +14,13 @@ import {
   getPMActiveProject, setPMActiveProject,
   ensurePMSeed,
 } from './data.js';
+
+import {
+  fetchAllNotionTasks,
+  createNotionTask,
+  updateNotionTask,
+  fromNotionPage,
+} from './notion.js';
 
 // ============================================================
 // ROUTER
@@ -315,6 +322,8 @@ function initAssignments() {
         </select>
       </div>
       <button id="btn-new-task" class="action-btn">+ NEW TASK</button>
+      <button id="btn-sync-notion" class="action-btn" style="border-color:#555;color:#555">⟳ SYNC NOTION</button>
+      <span id="sync-status" class="mono-label" style="color:#555"></span>
     </div>
     <div id="task-table-container"></div>
     <div id="task-board-container" class="board-container board-5col" style="display:none"></div>`;
@@ -329,6 +338,7 @@ function initAssignments() {
   document.getElementById('filter-astatus').addEventListener('change', e => { filterStatus = e.target.value; renderAssignments(); });
   document.getElementById('filter-apriority').addEventListener('change', e => { filterPriority = e.target.value; renderAssignments(); });
   document.getElementById('btn-new-task').addEventListener('click', openNewTaskModal);
+  document.getElementById('btn-sync-notion').addEventListener('click', syncWithNotion);
 }
 
 function filteredTasks() {
@@ -462,6 +472,7 @@ function openNewTaskModal() {
     fields: [
       { name: 'title',    label: 'TITLE',    type: 'text',   required: true },
       { name: 'subject',  label: 'SUBJECT',  type: 'select', options: SUBJECTS.map(s => ({ value: s, label: s })), required: true },
+      { name: 'type',     label: 'TYPE',     type: 'select', options: TASK_TYPES.map(t => ({ value: t, label: t })), required: false },
       { name: 'deadline', label: 'DEADLINE', type: 'date',   required: false },
       { name: 'priority', label: 'PRIORITY', type: 'select', options: PRIORITY.map(p => ({ value: p, label: p })), required: true },
       { name: 'status',   label: 'STATUS',   type: 'select', options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true },
@@ -483,6 +494,7 @@ function openEditTaskModal(id) {
     fields: [
       { name: 'title',    label: 'TITLE',    type: 'text',   required: true, defaultValue: t.title },
       { name: 'subject',  label: 'SUBJECT',  type: 'select', options: SUBJECTS.map(s => ({ value: s, label: s })), required: true, defaultValue: t.subject },
+      { name: 'type',     label: 'TYPE',     type: 'select', options: TASK_TYPES.map(t => ({ value: t, label: t })), required: false, defaultValue: t.type || '' },
       { name: 'deadline', label: 'DEADLINE', type: 'date',   required: false, defaultValue: t.deadline || '' },
       { name: 'priority', label: 'PRIORITY', type: 'select', options: PRIORITY.map(p => ({ value: p, label: p })), required: true, defaultValue: t.priority },
       { name: 'status',   label: 'STATUS',   type: 'select', options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true, defaultValue: t.status },
@@ -822,6 +834,91 @@ function renderGreekPortfolio() {
       updateGreekText(e.target.dataset.id, { notes: e.target.value });
     });
   });
+}
+
+// ============================================================
+// NOTION SYNC
+// ============================================================
+function setSyncStatus(state, msg = '') {
+  const btn = document.getElementById('btn-sync-notion');
+  const lbl = document.getElementById('sync-status');
+  if (!btn || !lbl) return;
+  const states = {
+    idle:    { text: '⟳ SYNC NOTION', color: '#555', label: '' },
+    syncing: { text: '⟳ SYNCING…',    color: 'var(--accent)', label: 'WORKING…' },
+    success: { text: '⟳ SYNC NOTION', color: 'var(--status-done)', label: '✓ SYNCED' },
+    error:   { text: '⟳ SYNC NOTION', color: 'var(--status-blocked)', label: '✗ ' + msg },
+  };
+  const s = states[state] || states.idle;
+  btn.textContent    = s.text;
+  btn.style.color    = s.color;
+  btn.style.borderColor = s.color;
+  lbl.textContent    = s.label;
+  lbl.style.color    = s.color;
+}
+
+async function syncWithNotion() {
+  setSyncStatus('syncing');
+
+  try {
+    // 1. Fetch all pages from Notion
+    const notionPages = await fetchAllNotionTasks();
+
+    // 2. Build lookup maps
+    const localByNotionId = Object.fromEntries(
+      tasks.filter(t => t.notionId).map(t => [t.notionId, t])
+    );
+    const notionIdSet = new Set(notionPages.map(p => p.id));
+
+    let updated = [...tasks];
+
+    // 3. Process each Notion page
+    for (const page of notionPages) {
+      const remote = fromNotionPage(page);
+      const local  = localByNotionId[page.id];
+
+      if (local) {
+        // Exists locally — last-write-wins on updatedAt
+        const remoteTime = new Date(page.last_edited_time);
+        const localTime  = new Date(local.updatedAt);
+        if (remoteTime > localTime) {
+          // Notion is newer: update local
+          updated = updated.map(t =>
+            t.id === local.id ? { ...t, ...remote, id: t.id, createdAt: t.createdAt } : t
+          );
+        } else {
+          // Local is newer: push to Notion
+          await updateNotionTask(page.id, local);
+        }
+      } else {
+        // New in Notion: pull down
+        updated = [...updated, {
+          id:        generateId('task'),
+          createdAt: page.created_time,
+          updatedAt: page.last_edited_time,
+          ...remote,
+        }];
+      }
+    }
+
+    // 4. Push local tasks that have no notionId yet
+    const needsPush = updated.filter(t => !t.notionId);
+    for (const task of needsPush) {
+      const page = await createNotionTask(task);
+      updated = updated.map(t =>
+        t.id === task.id ? { ...t, notionId: page.id } : t
+      );
+    }
+
+    // 5. Commit and re-render
+    setTasks(updated);
+    setSyncStatus('success');
+    setTimeout(() => setSyncStatus('idle'), 3000);
+    renderAndRefreshDash();
+  } catch (err) {
+    console.error('Notion sync failed:', err);
+    setSyncStatus('error', err.message.slice(0, 40));
+  }
 }
 
 // ============================================================
