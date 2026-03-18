@@ -28,22 +28,7 @@ export const GREEK_TEXT_STATUSES = ['DRAFT', 'REVISED', 'FINAL'];
 // ============================================================
 // SEED DATA
 // ============================================================
-const SEED_TASKS = [
-  { id: 'task_01', title: 'Calculus AA HL Paper 3 practice', subject: 'Math AA HL', deadline: '2026-04-10', priority: 'CRITICAL', status: 'IN_PROGRESS', type: 'Exam Prep', notes: '', notionId: '' },
-  { id: 'task_02', title: 'Comparative essay — La Haine', subject: 'Modern Greek SL', deadline: '2026-03-28', priority: 'HIGH', status: 'TODO', type: 'Homework', notes: '', notionId: '' },
-  { id: 'task_03', title: 'Cold War essay first draft', subject: 'Global Politics SL', deadline: '2026-03-21', priority: 'HIGH', status: 'IN_PROGRESS', type: 'IA', notes: 'Focus on 1947–1953', notionId: '' },
-  { id: 'task_04', title: 'Individual oral recording', subject: 'English B HL', deadline: '2026-04-03', priority: 'HIGH', status: 'TODO', type: 'Assessment', notes: '', notionId: '' },
-  { id: 'task_05', title: 'Business IA data analysis', subject: 'Business SL', deadline: '2026-04-15', priority: 'NORMAL', status: 'TODO', type: 'IA', notes: '', notionId: '' },
-  { id: 'task_06', title: 'CS HL dossier section 2', subject: 'CS HL', deadline: '2026-03-25', priority: 'HIGH', status: 'REVIEW', type: 'Project', notes: '', notionId: '' },
-  { id: 'task_07', title: 'TOK exhibition draft', subject: 'TOK', deadline: '2026-03-31', priority: 'CRITICAL', status: 'TODO', type: 'Assessment', notes: 'Choose 3 objects', notionId: '' },
-  { id: 'task_08', title: 'Integration by parts problem set', subject: 'Math AA HL', deadline: '2026-03-20', priority: 'NORMAL', status: 'DONE', type: 'Homework', notes: '', notionId: '' },
-  { id: 'task_09', title: 'EE second draft', subject: 'Global Politics SL', deadline: '2026-03-24', priority: 'CRITICAL', status: 'IN_PROGRESS', type: 'IA', notes: 'Target 3800 words', notionId: '' },
-  { id: 'task_10', title: 'Greek oral presentation prep', subject: 'Modern Greek SL', deadline: '2026-04-08', priority: 'HIGH', status: 'TODO', type: 'Assessment', notes: '', notionId: '' },
-  { id: 'task_11', title: 'CS HL IA criterion D', subject: 'CS HL', deadline: '2026-03-26', priority: 'HIGH', status: 'BLOCKED', type: 'IA', notes: 'Waiting for supervisor feedback', notionId: '' },
-  { id: 'task_12', title: 'Business SL mock exam revision', subject: 'Business SL', deadline: '2026-04-20', priority: 'NORMAL', status: 'TODO', type: 'Revision', notes: '', notionId: '' },
-  { id: 'task_13', title: 'TOK essay outline', subject: 'TOK', deadline: '2026-04-01', priority: 'HIGH', status: 'TODO', type: 'Homework', notes: '', notionId: '' },
-  { id: 'task_14', title: 'English B HL Paper 1 practice', subject: 'English B HL', deadline: '2026-04-22', priority: 'NORMAL', status: 'TODO', type: 'Exam Prep', notes: '', notionId: '' },
-];
+const SEED_TASKS = []; // Populated from Notion on first sync
 
 const SEED_PROJECTS = [
   { id: 'proj_01', name: 'ASKUS', status: 'ACTIVE', lastAction: 'Deployed auth module', nextStep: 'Add question feed UI', priority: 'HIGH' },
@@ -89,6 +74,19 @@ const STORE_KEYS = {
   ee:       'ib_ee',
   greek:    'ib_greek',
 };
+
+// Bump this string whenever the tasks schema changes to wipe stale localStorage.
+const DATA_VERSION     = '3'; // v3: notion sync, real subjects, no seed tasks
+const DATA_VERSION_KEY = 'ib_data_version';
+
+function migrateIfNeeded() {
+  if (localStorage.getItem(DATA_VERSION_KEY) !== DATA_VERSION) {
+    localStorage.removeItem(STORE_KEYS.tasks); // clear old seed data
+    localStorage.setItem(DATA_VERSION_KEY, DATA_VERSION);
+  }
+}
+
+migrateIfNeeded();
 
 export function loadData(key, seed) {
   try {

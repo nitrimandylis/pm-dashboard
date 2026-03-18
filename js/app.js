@@ -339,6 +339,9 @@ function initAssignments() {
   document.getElementById('filter-apriority').addEventListener('change', e => { filterPriority = e.target.value; renderAssignments(); });
   document.getElementById('btn-new-task').addEventListener('click', openNewTaskModal);
   document.getElementById('btn-sync-notion').addEventListener('click', syncWithNotion);
+
+  // Auto-sync on first load when there's no local data yet
+  if (tasks.length === 0) syncWithNotion();
 }
 
 function filteredTasks() {
