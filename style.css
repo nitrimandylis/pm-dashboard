@@ -31,8 +31,8 @@
 
   /* Priority colors */
   --priority-critical: #FF4747;
-  --priority-high:     #FFA347;
-  --priority-normal:   #AAAAAA;
+  --priority-high:     #FF4747;
+  --priority-normal:   #47C3FF;
   --priority-low:      #555555;
 }
 

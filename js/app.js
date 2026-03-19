@@ -19,6 +19,9 @@ import {
   fetchAllNotionTasks,
   createNotionTask,
   updateNotionTask,
+  archiveNotionTask,
+  fetchPageBody,
+  updatePageBody,
   fromNotionPage,
 } from './notion.js';
 
@@ -197,7 +200,7 @@ function renderDashboard() {
   // Urgent: overdue or CRITICAL/HIGH due within 7 days
   const urgent = notDone.filter(t => {
     if (t.deadline && new Date(t.deadline) < today) return true;
-    if ((t.priority === 'CRITICAL' || t.priority === 'HIGH') && t.deadline) {
+    if (t.priority === 'HIGH' && t.deadline) {
       const d = new Date(t.deadline);
       return d >= today && d <= weekEnd;
     }
@@ -243,8 +246,9 @@ function renderDashboard() {
         <div class="task-list">
           ${urgent.length ? urgent.map(t => {
             const days = daysUntil(t.deadline);
-            const overdueCls = days !== null && days < 0 ? 'style="border-left:2px solid var(--status-blocked);padding-left:8px"' : '';
-            const daysLabel = days === null ? '' : days < 0
+            const isOverdue = days !== null && days < 0 && t.status !== 'DONE';
+            const overdueCls = isOverdue ? 'style="border-left:2px solid var(--status-blocked);padding-left:8px"' : '';
+            const daysLabel = days === null ? '' : isOverdue
               ? `<span class="due-chip" style="color:var(--status-blocked)">${Math.abs(days)}d OVERDUE</span>`
               : `<span class="due-chip">${days}d LEFT</span>`;
             return `<div class="task-row" ${overdueCls}>
@@ -295,7 +299,11 @@ function renderDashboard() {
 // ASSIGNMENTS
 // ============================================================
 let assignmentViewMode = 'table';
-let filterSubject = '', filterStatus = '', filterPriority = '';
+let filterSubject = '', filterStatus = 'ACTIVE', filterPriority = '';
+let sortField = 'deadline', sortDir = 'asc';
+
+const PRIORITY_ORDER = { HIGH: 0, NORMAL: 1, LOW: 2 };
+const STATUS_ORDER   = { BLOCKED: 0, IN_PROGRESS: 1, REVIEW: 2, TODO: 3, DONE: 4 };
 
 function initAssignments() {
   const container = document.querySelector('main [data-view="assignments"]');
@@ -313,12 +321,25 @@ function initAssignments() {
           ${SUBJECTS.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
         </select>
         <select id="filter-astatus" class="filter-select">
+          <option value="ACTIVE">ACTIVE (not done)</option>
           <option value="">ALL STATUS</option>
           ${STATUS.map(s => `<option value="${esc(s)}">${fmtStatus(s)}</option>`).join('')}
         </select>
         <select id="filter-apriority" class="filter-select">
           <option value="">ALL PRIORITY</option>
           ${PRIORITY.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+        </select>
+        <select id="sort-field" class="filter-select">
+          <option value="deadline">SORT: DEADLINE</option>
+          <option value="priority">SORT: PRIORITY</option>
+          <option value="status">SORT: STATUS</option>
+          <option value="subject">SORT: SUBJECT</option>
+          <option value="title">SORT: TITLE</option>
+          <option value="updatedAt">SORT: UPDATED</option>
+        </select>
+        <select id="sort-dir" class="filter-select">
+          <option value="asc">ASC ↑</option>
+          <option value="desc">DESC ↓</option>
         </select>
       </div>
       <button id="btn-new-task" class="action-btn">+ NEW TASK</button>
@@ -337,6 +358,8 @@ function initAssignments() {
   document.getElementById('filter-subject').addEventListener('change', e => { filterSubject = e.target.value; renderAssignments(); });
   document.getElementById('filter-astatus').addEventListener('change', e => { filterStatus = e.target.value; renderAssignments(); });
   document.getElementById('filter-apriority').addEventListener('change', e => { filterPriority = e.target.value; renderAssignments(); });
+  document.getElementById('sort-field').addEventListener('change', e => { sortField = e.target.value; renderAssignments(); });
+  document.getElementById('sort-dir').addEventListener('change', e => { sortDir = e.target.value; renderAssignments(); });
   document.getElementById('btn-new-task').addEventListener('click', openNewTaskModal);
   document.getElementById('btn-sync-notion').addEventListener('click', syncWithNotion);
 
@@ -346,9 +369,34 @@ function initAssignments() {
 
 function filteredTasks() {
   let list = tasks;
-  if (filterSubject) list = list.filter(t => t.subject === filterSubject);
-  if (filterStatus)  list = list.filter(t => t.status === filterStatus);
-  if (filterPriority) list = list.filter(t => t.priority === filterPriority);
+  if (filterSubject)             list = list.filter(t => t.subject === filterSubject);
+  if (filterStatus === 'ACTIVE') list = list.filter(t => t.status !== 'DONE');
+  else if (filterStatus)         list = list.filter(t => t.status === filterStatus);
+  if (filterPriority)            list = list.filter(t => t.priority === filterPriority);
+
+  list = [...list].sort((a, b) => {
+    let va, vb;
+    if (sortField === 'deadline') {
+      va = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+      vb = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+    } else if (sortField === 'priority') {
+      va = PRIORITY_ORDER[a.priority] ?? 99;
+      vb = PRIORITY_ORDER[b.priority] ?? 99;
+    } else if (sortField === 'status') {
+      va = STATUS_ORDER[a.status] ?? 99;
+      vb = STATUS_ORDER[b.status] ?? 99;
+    } else if (sortField === 'updatedAt') {
+      va = new Date(a.updatedAt).getTime();
+      vb = new Date(b.updatedAt).getTime();
+    } else {
+      va = (a[sortField] || '').toLowerCase();
+      vb = (b[sortField] || '').toLowerCase();
+    }
+    if (va < vb) return sortDir === 'asc' ? -1 : 1;
+    if (va > vb) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
   return list;
 }
 
@@ -366,6 +414,10 @@ function renderAssignments() {
   if (subj) subj.value = filterSubject;
   if (stat) stat.value = filterStatus;
   if (pri)  pri.value  = filterPriority;
+  const sortFieldEl = document.getElementById('sort-field');
+  const sortDirEl   = document.getElementById('sort-dir');
+  if (sortFieldEl) sortFieldEl.value = sortField;
+  if (sortDirEl)   sortDirEl.value   = sortDir;
 
   const list = filteredTasks();
   const tableContainer = document.getElementById('task-table-container');
@@ -396,19 +448,19 @@ function renderAssignmentTable(list, container) {
     </div>
     ${list.length ? list.map(t => {
       const days = daysUntil(t.deadline);
-      const overdue = days !== null && days < 0;
+      const overdue = days !== null && days < 0 && t.status !== 'DONE';
       const daysDisplay = days === null ? '—'
         : overdue ? `<span style="color:var(--status-blocked)">${days}d</span>`
         : `${days}d`;
       return `<div class="task-row assign-row" data-id="${t.id}" style="grid-template-columns:${cols}">
-        <div class="priority-dot p-dot-${t.priority}" title="${t.priority}"></div>
+        <div class="priority-dot p-dot-${t.priority} clickable-task-priority" data-id="${t.id}" title="Click to cycle priority (${t.priority})" style="cursor:pointer"></div>
         <div class="task-title">${esc(t.title)}
           ${t.notes ? `<span class="due-chip" title="${esc(t.notes)}">NOTE</span>` : ''}
         </div>
         <div>${subjectBadge(t.subject)}</div>
         <div class="task-assignee">${fmtDate(t.deadline)}</div>
         <div class="task-assignee">${daysDisplay}</div>
-        <div class="status-badge s-${t.status}">${fmtStatus(t.status)}</div>
+        <div class="status-badge s-${t.status} clickable-task-status" data-id="${t.id}" title="Click to cycle status" style="cursor:pointer">${fmtStatus(t.status)}</div>
         <div class="ticket-actions">
           <button class="edit-btn edit-task-btn" data-id="${t.id}" title="Edit">&#x270E;</button>
           <button class="edit-btn delete-task-btn" data-id="${t.id}" title="Delete">&#x2715;</button>
@@ -424,6 +476,8 @@ function renderAssignmentTable(list, container) {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       if (btn.dataset.confirm) {
+        const t = tasks.find(t => t.id === btn.dataset.id);
+        if (t?.notionId) archiveNotionTask(t.notionId).catch(err => console.error('Notion delete failed:', err));
         deleteTask(btn.dataset.id);
         renderAndRefreshDash();
       } else {
@@ -434,6 +488,34 @@ function renderAssignmentTable(list, container) {
           if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; }
         }, 3000);
       }
+    });
+  });
+
+  bindTaskCycleClicks(container);
+}
+
+const TASK_STATUS_CYCLE   = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
+const TASK_PRIORITY_CYCLE = ['HIGH', 'NORMAL', 'LOW'];
+
+function bindTaskCycleClicks(container) {
+  container.querySelectorAll('.clickable-task-status').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const t = tasks.find(t => t.id === el.dataset.id);
+      if (!t) return;
+      const next = TASK_STATUS_CYCLE[(TASK_STATUS_CYCLE.indexOf(t.status) + 1) % TASK_STATUS_CYCLE.length];
+      updateTask(el.dataset.id, { status: next });
+      renderAndRefreshDash();
+    });
+  });
+  container.querySelectorAll('.clickable-task-priority').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const t = tasks.find(t => t.id === el.dataset.id);
+      if (!t) return;
+      const next = TASK_PRIORITY_CYCLE[(TASK_PRIORITY_CYCLE.indexOf(t.priority) + 1) % TASK_PRIORITY_CYCLE.length];
+      updateTask(el.dataset.id, { priority: next });
+      renderAndRefreshDash();
     });
   });
 }
@@ -447,43 +529,75 @@ function renderAssignmentBoard(list, container) {
         <span class="status-badge s-${col}">${fmtStatus(col)}</span>
         <span class="mono-label board-col-count">${colTasks.length}</span>
       </div>
-      <div class="board-col-cards">
+      <div class="board-col-cards task-drop-zone" data-col="${col}">
         ${colTasks.map(t => {
           const days = daysUntil(t.deadline);
+          const isOverdue = days !== null && days < 0 && t.status !== 'DONE';
           const daysChip = days !== null
-            ? `<span class="due-chip" style="${days < 0 ? 'color:var(--status-blocked)' : ''}">${days < 0 ? Math.abs(days) + 'd OVERDUE' : days + 'd LEFT'}</span>`
+            ? `<span class="due-chip" style="${isOverdue ? 'color:var(--status-blocked)' : ''}">${isOverdue ? Math.abs(days) + 'd OVERDUE' : days < 0 ? Math.abs(days) + 'd ago' : days + 'd LEFT'}</span>`
             : '';
-          return `<div class="board-card s-border-${t.status}">
+          return `<div class="board-card s-border-${t.status}" draggable="true" data-id="${t.id}">
             <div class="card-title-row">
               <div class="card-title">${esc(t.title)}</div>
             </div>
             <div style="margin-bottom:6px">${subjectBadge(t.subject)}</div>
             <div class="card-meta">
-              <span class="priority-badge p-${t.priority}">${t.priority}</span>
+              <span class="priority-badge p-${t.priority} clickable-task-priority" data-id="${t.id}" title="Click to cycle priority" style="cursor:pointer">${t.priority}</span>
               ${daysChip}
+            </div>
+            <div style="margin-top:6px">
+              <span class="status-badge s-${t.status} clickable-task-status" data-id="${t.id}" title="Click to cycle status" style="cursor:pointer">${fmtStatus(t.status)}</span>
             </div>
           </div>`;
         }).join('')}
       </div>
     </div>`;
   }).join('');
+
+  container.querySelectorAll('.board-card[draggable]').forEach(card => {
+    card.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', card.dataset.id); card.classList.add('dragging'); });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  });
+
+  container.querySelectorAll('.task-drop-zone').forEach(zone => {
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      const id = e.dataTransfer.getData('text/plain');
+      updateTask(id, { status: zone.dataset.col });
+      renderAndRefreshDash();
+    });
+  });
+
+  bindTaskCycleClicks(container);
 }
 
 function openNewTaskModal() {
   openModal({
     title: 'NEW TASK',
     fields: [
-      { name: 'title',    label: 'TITLE',    type: 'text',   required: true },
-      { name: 'subject',  label: 'SUBJECT',  type: 'select', options: SUBJECTS.map(s => ({ value: s, label: s })), required: true },
-      { name: 'type',     label: 'TYPE',     type: 'select', options: TASK_TYPES.map(t => ({ value: t, label: t })), required: false },
-      { name: 'deadline', label: 'DEADLINE', type: 'date',   required: false },
-      { name: 'priority', label: 'PRIORITY', type: 'select', options: PRIORITY.map(p => ({ value: p, label: p })), required: true },
-      { name: 'status',   label: 'STATUS',   type: 'select', options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true },
+      { name: 'title',    label: 'TITLE',    type: 'text',     required: true },
+      { name: 'subject',  label: 'SUBJECT',  type: 'select',   options: SUBJECTS.map(s => ({ value: s, label: s })), required: true },
+      { name: 'type',     label: 'TYPE',     type: 'select',   options: TASK_TYPES.map(t => ({ value: t, label: t })), required: false },
+      { name: 'deadline', label: 'DEADLINE', type: 'date',     required: false },
+      { name: 'priority', label: 'PRIORITY', type: 'select',   options: PRIORITY.map(p => ({ value: p, label: p })), required: true },
+      { name: 'status',   label: 'STATUS',   type: 'select',   options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true },
       { name: 'notes',    label: 'NOTES',    type: 'textarea', required: false },
+      { name: 'body',     label: 'BODY',     type: 'textarea', required: false },
     ],
     onSubmit(data) {
-      createTask(data);
+      const task = createTask(data);
       renderAndRefreshDash();
+      // Push to Notion in the background
+      createNotionTask(task).then(async page => {
+        if (!page?.id) return;
+        updateTask(task.id, { notionId: page.id });
+        if (task.body?.trim()) {
+          await updatePageBody(page.id, task.body).catch(err => console.error('Body push failed:', err));
+        }
+      }).catch(err => console.error('Notion create failed:', err));
     },
   });
 }
@@ -495,17 +609,22 @@ function openEditTaskModal(id) {
     title: 'EDIT TASK',
     submitLabel: 'SAVE',
     fields: [
-      { name: 'title',    label: 'TITLE',    type: 'text',   required: true, defaultValue: t.title },
-      { name: 'subject',  label: 'SUBJECT',  type: 'select', options: SUBJECTS.map(s => ({ value: s, label: s })), required: true, defaultValue: t.subject },
-      { name: 'type',     label: 'TYPE',     type: 'select', options: TASK_TYPES.map(t => ({ value: t, label: t })), required: false, defaultValue: t.type || '' },
-      { name: 'deadline', label: 'DEADLINE', type: 'date',   required: false, defaultValue: t.deadline || '' },
-      { name: 'priority', label: 'PRIORITY', type: 'select', options: PRIORITY.map(p => ({ value: p, label: p })), required: true, defaultValue: t.priority },
-      { name: 'status',   label: 'STATUS',   type: 'select', options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true, defaultValue: t.status },
+      { name: 'title',    label: 'TITLE',    type: 'text',     required: true, defaultValue: t.title },
+      { name: 'subject',  label: 'SUBJECT',  type: 'select',   options: SUBJECTS.map(s => ({ value: s, label: s })), required: true, defaultValue: t.subject },
+      { name: 'type',     label: 'TYPE',     type: 'select',   options: TASK_TYPES.map(t => ({ value: t, label: t })), required: false, defaultValue: t.type || '' },
+      { name: 'deadline', label: 'DEADLINE', type: 'date',     required: false, defaultValue: t.deadline || '' },
+      { name: 'priority', label: 'PRIORITY', type: 'select',   options: PRIORITY.map(p => ({ value: p, label: p })), required: true, defaultValue: t.priority },
+      { name: 'status',   label: 'STATUS',   type: 'select',   options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true, defaultValue: t.status },
       { name: 'notes',    label: 'NOTES',    type: 'textarea', required: false, defaultValue: t.notes || '' },
+      { name: 'body',     label: 'BODY',     type: 'textarea', required: false, defaultValue: t.body || '' },
     ],
     onSubmit(data) {
       updateTask(id, data);
       renderAndRefreshDash();
+      if (t.notionId) {
+        updateNotionTask(t.notionId, { ...t, ...data }).catch(err => console.error('Notion update failed:', err));
+        updatePageBody(t.notionId, data.body || '').catch(err => console.error('Body push failed:', err));
+      }
     },
   });
 }
@@ -885,20 +1004,24 @@ async function syncWithNotion() {
         const remoteTime = new Date(page.last_edited_time);
         const localTime  = new Date(local.updatedAt);
         if (remoteTime >= localTime) {
-          // Notion is newer (or equal): update local, no push needed
+          // Notion is newer (or equal): pull body (skip for DONE), update local
+          const body = remote.status !== 'DONE' ? await fetchPageBody(page.id) : (local.body || '');
           updated = updated.map(t =>
-            t.id === local.id ? { ...t, ...remote, id: t.id, createdAt: t.createdAt } : t
+            t.id === local.id ? { ...t, ...remote, body, id: t.id, createdAt: t.createdAt } : t
           );
         } else {
-          // Local is newer: push to Notion
+          // Local is newer: push properties and body to Notion
           await updateNotionTask(page.id, local);
+          if (local.status !== 'DONE') await updatePageBody(page.id, local.body || '');
         }
       } else {
-        // New in Notion: pull down
+        // New in Notion: pull properties and body (skip body for DONE)
+        const body = remote.status !== 'DONE' ? await fetchPageBody(page.id) : '';
         updated = [...updated, {
           id:        generateId('task'),
           createdAt: page.created_time,
           updatedAt: page.last_edited_time,
+          body,
           ...remote,
         }];
       }
@@ -911,9 +1034,16 @@ async function syncWithNotion() {
       updated = updated.map(t =>
         t.id === task.id ? { ...t, notionId: page.id } : t
       );
+      if (task.body?.trim()) {
+        await updatePageBody(page.id, task.body).catch(err => console.error('Body push failed:', err));
+      }
     }
 
-    // 5. Commit and re-render
+    // 5. Drop DONE tasks older than 7 days, then commit and re-render
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    updated = updated.filter(t =>
+      t.status !== 'DONE' || new Date(t.updatedAt).getTime() >= cutoff
+    );
     setTasks(updated);
     setSyncStatus('success');
     setTimeout(() => setSyncStatus('idle'), 3000);

@@ -19,7 +19,7 @@ export const SUBJECTS = [
 ];
 
 export const STATUS     = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
-export const PRIORITY   = ['CRITICAL', 'HIGH', 'NORMAL', 'LOW'];
+export const PRIORITY   = ['HIGH', 'NORMAL', 'LOW'];
 export const TASK_TYPES = ['Homework', 'IA', 'Assessment', 'Exam Prep', 'Project', 'Revision'];
 
 export const SIDE_QUEST_STATUSES = ['ACTIVE', 'PAUSED', 'DONE'];
@@ -34,7 +34,7 @@ const SEED_PROJECTS = [
   { id: 'proj_01', name: 'ASKUS', status: 'ACTIVE', lastAction: 'Deployed auth module', nextStep: 'Add question feed UI', priority: 'HIGH' },
   { id: 'proj_02', name: 'ClearFeed', status: 'PAUSED', lastAction: 'RSS parser working', nextStep: 'Design reading view', priority: 'NORMAL' },
   { id: 'proj_03', name: 'Notion Second Brain', status: 'ACTIVE', lastAction: 'IB subject structure done', nextStep: 'Link to assignments', priority: 'NORMAL' },
-  { id: 'proj_04', name: 'IB Dashboard', status: 'ACTIVE', lastAction: 'Phase 1 complete', nextStep: 'Build data layer', priority: 'CRITICAL' },
+  { id: 'proj_04', name: 'IB Dashboard', status: 'ACTIVE', lastAction: 'Phase 1 complete', nextStep: 'Build data layer', priority: 'HIGH' },
 ];
 
 const SEED_EE = {
@@ -76,7 +76,7 @@ const STORE_KEYS = {
 };
 
 // Bump this string whenever the tasks schema changes to wipe stale localStorage.
-const DATA_VERSION     = '3'; // v3: notion sync, real subjects, no seed tasks
+const DATA_VERSION     = '4'; // v4: added body field to tasks
 const DATA_VERSION_KEY = 'ib_data_version';
 
 function migrateIfNeeded() {

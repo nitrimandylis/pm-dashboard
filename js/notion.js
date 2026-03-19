@@ -52,6 +52,29 @@ export async function archiveNotionTask(notionId) {
   return notionReq(`/pages/${notionId}`, 'PATCH', { archived: true });
 }
 
+export async function fetchPageBody(pageId) {
+  const data = await notionReq(`/blocks/${pageId}/children`);
+  return data.results
+    .filter(b => b.type === 'paragraph')
+    .map(b => b.paragraph.rich_text.map(r => r.plain_text).join(''))
+    .join('\n');
+}
+
+export async function updatePageBody(pageId, text) {
+  // Clear existing blocks then write new ones
+  const data = await notionReq(`/blocks/${pageId}/children`);
+  for (const block of data.results) {
+    await notionReq(`/blocks/${block.id}`, 'DELETE');
+  }
+  if (!text.trim()) return;
+  const children = text.split('\n').map(line => ({
+    object: 'block',
+    type: 'paragraph',
+    paragraph: { rich_text: [{ type: 'text', text: { content: line } }] },
+  }));
+  await notionReq(`/blocks/${pageId}/children`, 'PATCH', { children });
+}
+
 // ── Field mapping: dashboard → Notion ────────────────────────────────────
 
 function toNotionProps(task, isCreate = false) {
@@ -89,9 +112,9 @@ export function fromNotionPage(page) {
 // ── Priority ──────────────────────────────────────────────────────────────
 
 function priorityOut(p) {
-  if (p === 'CRITICAL' || p === 'HIGH') return { name: '🔥 High' };
-  if (p === 'LOW')                       return { name: '🧊 Low' };
-  return                                        { name: '⚡ Medium' };
+  if (p === 'HIGH') return { name: '🔥 High' };
+  if (p === 'LOW')  return { name: '🧊 Low' };
+  return                   { name: '⚡ Medium' };
 }
 
 function priorityIn(n) {
