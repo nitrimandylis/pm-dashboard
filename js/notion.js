@@ -3,7 +3,10 @@
 // All requests routed through /api/notion/* proxy in server.js
 // ============================================================
 
-const DB_ID = '223cc494-686e-41c4-a564-ae020263974e';
+const DB_ASSIGNMENTS = '223cc494-686e-41c4-a564-ae020263974e';
+const DB_SIDE_QUESTS = '3cf2a8dc-1f1e-4538-9776-93ea7ada1af6';
+const DB_EE          = '483cdbbc-a8de-4a8d-98cb-9eccd75addeb';
+const DB_GREEK       = 'd7f59811-62b8-4159-9790-fb32e598607f';
 
 async function notionReq(path, method = 'GET', body = null) {
   const res = await fetch(`/api/notion${path}`, {
@@ -18,26 +21,32 @@ async function notionReq(path, method = 'GET', body = null) {
   return data;
 }
 
-// ── Read ──────────────────────────────────────────────────────────────────
+// ── Shared paginated fetch ────────────────────────────────────────────────
 
-export async function fetchAllNotionTasks() {
+async function queryDatabase(dbId) {
   const pages = [];
   let cursor;
   do {
     const body = { page_size: 100 };
     if (cursor) body.start_cursor = cursor;
-    const data = await notionReq(`/databases/${DB_ID}/query`, 'POST', body);
+    const data = await notionReq(`/databases/${dbId}/query`, 'POST', body);
     pages.push(...data.results);
     cursor = data.has_more ? data.next_cursor : undefined;
   } while (cursor);
   return pages;
 }
 
+// ── Read ──────────────────────────────────────────────────────────────────
+
+export async function fetchAllNotionTasks() {
+  return queryDatabase(DB_ASSIGNMENTS);
+}
+
 // ── Write ─────────────────────────────────────────────────────────────────
 
 export async function createNotionTask(task) {
   return notionReq('/pages', 'POST', {
-    parent: { database_id: DB_ID },
+    parent: { database_id: DB_ASSIGNMENTS },
     properties: toNotionProps(task, true),
   });
 }
@@ -137,4 +146,106 @@ function statusIn(n) {
   if (n === 'In Progress') return 'IN_PROGRESS';
   if (n === 'Overdue')     return 'BLOCKED';
   return 'TODO';
+}
+
+// ── Side Quests ───────────────────────────────────────────────────────────
+
+export async function fetchAllNotionProjects()         { return queryDatabase(DB_SIDE_QUESTS); }
+export async function createNotionProject(p)           { return notionReq('/pages', 'POST', { parent: { database_id: DB_SIDE_QUESTS }, properties: toNotionProjectProps(p) }); }
+export async function updateNotionProject(notionId, p) { return notionReq(`/pages/${notionId}`, 'PATCH', { properties: toNotionProjectProps(p) }); }
+export async function archiveNotionProject(notionId)   { return notionReq(`/pages/${notionId}`, 'PATCH', { archived: true }); }
+
+function toNotionProjectProps(p) {
+  return {
+    Name:    { title: [{ text: { content: p.name || '' } }] },
+    Status:  { select: projectStatusOut(p.status) },
+    Notes:   { rich_text: [{ text: { content: p.lastAction || '' } }] },
+    Outcome: { rich_text: [{ text: { content: p.nextStep  || '' } }] },
+  };
+}
+
+export function fromNotionProject(page) {
+  const p = page.properties;
+  return {
+    notionId:         page.id,
+    name:             p.Name?.title?.[0]?.plain_text || '',
+    status:           projectStatusIn(p.Status?.select?.name),
+    lastAction:       p.Notes?.rich_text?.[0]?.plain_text   || '',
+    nextStep:         p.Outcome?.rich_text?.[0]?.plain_text || '',
+    _notionCategory:  (p.Category?.multi_select || []).map(c => c.name),
+    _notionBusiness:  (p['Business Venture']?.multi_select || []).map(c => c.name),
+    _notionLink:      p.Link?.url || '',
+    notionUpdatedAt:  page.last_edited_time,
+  };
+}
+
+function projectStatusOut(s) {
+  if (s === 'ACTIVE') return { name: 'In Progress' };
+  if (s === 'DONE')   return { name: 'Completed' };
+  return                     { name: 'Planning' };
+}
+
+function projectStatusIn(n) {
+  if (n === 'In Progress')                  return 'ACTIVE';
+  if (n === 'Completed' || n === 'Abandoned') return 'DONE';
+  return 'PAUSED';
+}
+
+// ── EE Tracker ────────────────────────────────────────────────────────────
+
+export async function fetchAllNotionMilestones()           { return queryDatabase(DB_EE); }
+export async function createNotionMilestone(m)             { return notionReq('/pages', 'POST', { parent: { database_id: DB_EE }, properties: toNotionMilestoneProps(m) }); }
+export async function updateNotionMilestone(notionId, m)   { return notionReq(`/pages/${notionId}`, 'PATCH', { properties: toNotionMilestoneProps(m) }); }
+
+function toNotionMilestoneProps(m) {
+  return {
+    Component: { title: [{ text: { content: m.label || '' } }] },
+    Status:    { select: m.done ? { name: 'Complete' } : { name: 'In Progress' } },
+  };
+}
+
+export function fromNotionMilestone(page) {
+  const p = page.properties;
+  return {
+    notionId:        page.id,
+    label:           p.Component?.title?.[0]?.plain_text || '',
+    done:            p.Status?.select?.name === 'Complete',
+    notionUpdatedAt: page.last_edited_time,
+  };
+}
+
+// ── Greek Portfolio ───────────────────────────────────────────────────────
+
+export async function fetchAllNotionTexts()              { return queryDatabase(DB_GREEK); }
+export async function createNotionText(t)                { return notionReq('/pages', 'POST', { parent: { database_id: DB_GREEK }, properties: toNotionTextProps(t) }); }
+export async function updateNotionText(notionId, t)      { return notionReq(`/pages/${notionId}`, 'PATCH', { properties: toNotionTextProps(t) }); }
+export async function archiveNotionText(notionId)        { return notionReq(`/pages/${notionId}`, 'PATCH', { archived: true }); }
+
+function toNotionTextProps(t) {
+  return {
+    Title:  { title: [{ text: { content: t.title || '' } }] },
+    Status: { select: greekStatusOut(t.status) },
+  };
+}
+
+export function fromNotionText(page) {
+  const p = page.properties;
+  return {
+    notionId:        page.id,
+    title:           p.Title?.title?.[0]?.plain_text || '',
+    status:          greekStatusIn(p.Status?.select?.name),
+    notionUpdatedAt: page.last_edited_time,
+  };
+}
+
+function greekStatusOut(s) {
+  if (s === 'REVISED') return { name: 'In Progress' };
+  if (s === 'FINAL')   return { name: 'Done' };
+  return                      { name: 'Not Started' };
+}
+
+function greekStatusIn(n) {
+  if (n === 'In Progress') return 'REVISED';
+  if (n === 'Done')        return 'FINAL';
+  return 'DRAFT';
 }

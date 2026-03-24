@@ -8,11 +8,9 @@ import {
   ee, updateEE, addMeeting,
   greek, updateGreek, updateGreekText,
   // PM
-  getPMProjects, createPMProject, updatePMProject, deletePMProject,
   getPMTickets, createPMTicket, updatePMTicket, deletePMTicket,
   getPMTeam, createPMMember, updatePMMember, deletePMMember,
   getPMActiveProject, setPMActiveProject,
-  ensurePMSeed,
 } from './data.js';
 
 import {
@@ -23,6 +21,9 @@ import {
   fetchPageBody,
   updatePageBody,
   fromNotionPage,
+  fetchAllNotionProjects, createNotionProject, updateNotionProject, archiveNotionProject, fromNotionProject,
+  fetchAllNotionMilestones, createNotionMilestone, updateNotionMilestone, fromNotionMilestone,
+  fetchAllNotionTexts, createNotionText, updateNotionText, archiveNotionText, fromNotionText,
 } from './notion.js';
 
 // ============================================================
@@ -361,10 +362,10 @@ function initAssignments() {
   document.getElementById('sort-field').addEventListener('change', e => { sortField = e.target.value; renderAssignments(); });
   document.getElementById('sort-dir').addEventListener('change', e => { sortDir = e.target.value; renderAssignments(); });
   document.getElementById('btn-new-task').addEventListener('click', openNewTaskModal);
-  document.getElementById('btn-sync-notion').addEventListener('click', syncWithNotion);
+  document.getElementById('btn-sync-notion').addEventListener('click', syncAssignmentsWithNotion);
 
   // Auto-sync on first load when there's no local data yet
-  if (tasks.length === 0) syncWithNotion();
+  if (tasks.length === 0) syncAssignmentsWithNotion();
 }
 
 function filteredTasks() {
@@ -505,6 +506,7 @@ function bindTaskCycleClicks(container) {
       if (!t) return;
       const next = TASK_STATUS_CYCLE[(TASK_STATUS_CYCLE.indexOf(t.status) + 1) % TASK_STATUS_CYCLE.length];
       updateTask(el.dataset.id, { status: next });
+      schedulePush('assignments', el.dataset.id);
       renderAndRefreshDash();
     });
   });
@@ -515,6 +517,7 @@ function bindTaskCycleClicks(container) {
       if (!t) return;
       const next = TASK_PRIORITY_CYCLE[(TASK_PRIORITY_CYCLE.indexOf(t.priority) + 1) % TASK_PRIORITY_CYCLE.length];
       updateTask(el.dataset.id, { priority: next });
+      schedulePush('assignments', el.dataset.id);
       renderAndRefreshDash();
     });
   });
@@ -567,6 +570,7 @@ function renderAssignmentBoard(list, container) {
       zone.classList.remove('drag-over');
       const id = e.dataTransfer.getData('text/plain');
       updateTask(id, { status: zone.dataset.col });
+      schedulePush('assignments', id);
       renderAndRefreshDash();
     });
   });
@@ -589,15 +593,8 @@ function openNewTaskModal() {
     ],
     onSubmit(data) {
       const task = createTask(data);
+      schedulePush('assignments', task.id);
       renderAndRefreshDash();
-      // Push to Notion in the background
-      createNotionTask(task).then(async page => {
-        if (!page?.id) return;
-        updateTask(task.id, { notionId: page.id });
-        if (task.body?.trim()) {
-          await updatePageBody(page.id, task.body).catch(err => console.error('Body push failed:', err));
-        }
-      }).catch(err => console.error('Notion create failed:', err));
     },
   });
 }
@@ -620,11 +617,8 @@ function openEditTaskModal(id) {
     ],
     onSubmit(data) {
       updateTask(id, data);
+      schedulePush('assignments', id);
       renderAndRefreshDash();
-      if (t.notionId) {
-        updateNotionTask(t.notionId, { ...t, ...data }).catch(err => console.error('Notion update failed:', err));
-        updatePageBody(t.notionId, data.body || '').catch(err => console.error('Body push failed:', err));
-      }
     },
   });
 }
@@ -649,9 +643,12 @@ function renderEETracker() {
   const doneMilestones = ee.milestones.filter(m => m.done).length;
 
   container.innerHTML = `
-    <div class="section-header display-text" style="margin-bottom:var(--spacing-lg)">
-      EE TRACKER
-      <span class="tag">EXTENDED ESSAY</span>
+    <div class="view-toolbar" style="margin-bottom:var(--spacing-md)">
+      <div class="section-header display-text" style="border:none;margin:0">
+        EE TRACKER <span class="tag">EXTENDED ESSAY</span>
+      </div>
+      <button id="btn-sync-notion-ee" class="action-btn" style="border-color:#555;color:#555">⟳ SYNC NOTION</button>
+      <span id="sync-status-ee" class="mono-label" style="color:#555"></span>
     </div>
 
     <div class="ee-grid">
@@ -718,9 +715,12 @@ function renderEETracker() {
         m.id === cb.dataset.id ? { ...m, done: cb.checked } : m
       );
       updateEE({ milestones: updated });
+      schedulePush('ee', cb.dataset.id);
       renderEETracker();
     });
   });
+
+  document.getElementById('btn-sync-notion-ee').addEventListener('click', syncEEWithNotion);
 
   // Add meeting
   document.getElementById('btn-add-meeting').addEventListener('click', () => {
@@ -738,108 +738,6 @@ function renderEETracker() {
   });
 }
 
-// ============================================================
-// SIDE QUESTS
-// ============================================================
-function renderSideQuests() {
-  const container = document.querySelector('main [data-view="side-quests"]');
-  if (!container) return;
-
-  const statusColor = { ACTIVE: 'var(--accent)', PAUSED: '#555', DONE: 'var(--status-done)' };
-
-  container.innerHTML = `
-    <div class="notice-board" style="margin-bottom:var(--spacing-lg)">
-      <div class="notice-headline">
-        <span class="filled">SIDE QUESTS</span>
-        <span>PARALLEL</span>
-        <span>PROGRESS</span>
-      </div>
-      <div class="notice-footer">
-        <span>${projects.filter(p => p.status === 'ACTIVE').length} ACTIVE</span>
-        <span>${projects.length} TOTAL</span>
-      </div>
-    </div>
-
-    <div class="view-toolbar">
-      <div class="section-header display-text" style="border:none;margin:0;font-size:32px">PROJECTS</div>
-      <button id="btn-new-project" class="action-btn">+ NEW PROJECT</button>
-    </div>
-
-    <div class="task-list">
-      <div class="task-row table-header" style="grid-template-columns:8px 1fr 80px 1fr 1fr 64px">
-        <div></div>
-        <div class="mono-label">NAME</div>
-        <div class="mono-label">STATUS</div>
-        <div class="mono-label">LAST ACTION</div>
-        <div class="mono-label">NEXT STEP</div>
-        <div></div>
-      </div>
-      ${projects.length ? projects.map(p => `
-        <div class="task-row assign-row" data-id="${p.id}" style="grid-template-columns:8px 1fr 80px 1fr 1fr 64px">
-          <div class="priority-dot p-dot-${p.priority}" title="${p.priority}"></div>
-          <div class="task-title">${esc(p.name)}</div>
-          <div class="status-badge" style="color:${statusColor[p.status] || '#555'}">${esc(p.status)}</div>
-          <div class="task-assignee">${esc(p.lastAction || '—')}</div>
-          <div class="task-assignee">${esc(p.nextStep || '—')}</div>
-          <div class="ticket-actions">
-            <button class="edit-btn edit-project-btn" data-id="${p.id}" title="Edit">&#x270E;</button>
-            <button class="edit-btn delete-project-btn" data-id="${p.id}" title="Delete">&#x2715;</button>
-          </div>
-        </div>`).join('')
-      : '<div class="empty-state">No projects yet.</div>'}
-    </div>`;
-
-  document.getElementById('btn-new-project').addEventListener('click', () => {
-    openModal({
-      title: 'NEW PROJECT',
-      fields: [
-        { name: 'name',       label: 'NAME',        type: 'text',   required: true },
-        { name: 'status',     label: 'STATUS',      type: 'select', options: SIDE_QUEST_STATUSES, required: true },
-        { name: 'lastAction', label: 'LAST ACTION', type: 'text',   required: false },
-        { name: 'nextStep',   label: 'NEXT STEP',   type: 'text',   required: false },
-        { name: 'priority',   label: 'PRIORITY',    type: 'select', options: PRIORITY, required: true },
-      ],
-      onSubmit(data) { createProject(data); renderSideQuests(); },
-    });
-  });
-
-  container.querySelectorAll('.edit-project-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const p = projects.find(p => p.id === btn.dataset.id);
-      if (!p) return;
-      openModal({
-        title: 'EDIT PROJECT',
-        submitLabel: 'SAVE',
-        fields: [
-          { name: 'name',       label: 'NAME',        type: 'text',   required: true,  defaultValue: p.name },
-          { name: 'status',     label: 'STATUS',      type: 'select', options: SIDE_QUEST_STATUSES, required: true, defaultValue: p.status },
-          { name: 'lastAction', label: 'LAST ACTION', type: 'text',   required: false, defaultValue: p.lastAction || '' },
-          { name: 'nextStep',   label: 'NEXT STEP',   type: 'text',   required: false, defaultValue: p.nextStep || '' },
-          { name: 'priority',   label: 'PRIORITY',    type: 'select', options: PRIORITY, required: true, defaultValue: p.priority },
-        ],
-        onSubmit(data) { updateProject(btn.dataset.id, data); renderSideQuests(); },
-      });
-    });
-  });
-
-  container.querySelectorAll('.delete-project-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      if (btn.dataset.confirm) {
-        deleteProject(btn.dataset.id);
-        renderSideQuests();
-      } else {
-        btn.dataset.confirm = '1';
-        btn.textContent = 'SURE?';
-        btn.style.color = 'var(--status-blocked)';
-        setTimeout(() => {
-          if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; }
-        }, 3000);
-      }
-    });
-  });
-}
 
 // ============================================================
 // GREEK PORTFOLIO
@@ -856,9 +754,12 @@ function renderGreekPortfolio() {
   const statusColor = { DRAFT: '#555', REVISED: 'var(--status-review)', FINAL: 'var(--status-done)' };
 
   container.innerHTML = `
-    <div class="section-header display-text" style="margin-bottom:var(--spacing-lg)">
-      GREEK PORTFOLIO
-      <span class="tag">LANGUAGE B HL</span>
+    <div class="view-toolbar" style="margin-bottom:var(--spacing-lg)">
+      <div class="section-header display-text" style="border:none;margin:0">
+        GREEK PORTFOLIO <span class="tag">LANGUAGE B HL</span>
+      </div>
+      <button id="btn-sync-notion-greek" class="action-btn" style="border-color:#555;color:#555">⟳ SYNC NOTION</button>
+      <span id="sync-status-greek" class="mono-label" style="color:#555"></span>
     </div>
 
     <!-- Global Issue -->
@@ -892,7 +793,7 @@ function renderGreekPortfolio() {
           <div>
             ${t.wordCount ? `<span class="due-chip">${t.wordCount}w</span>` : ''}
           </div>
-          <div class="status-badge" style="color:${statusColor[t.status] || '#555'}">${esc(t.status)}</div>
+          <div class="status-badge clickable-greek-status" data-id="${t.id}" style="color:${statusColor[t.status] || '#555'};cursor:pointer" title="Click to cycle status">${esc(t.status)}</div>
           <button class="edit-btn greek-expand-btn" data-id="${t.id}" title="Expand">${isExpanded ? '▲' : '▼'}</button>
           ${isExpanded ? `<div class="greek-text-detail" data-id="${t.id}"
             style="grid-column:1/-1;padding:var(--spacing-sm) 0;border-top:1px solid #222;margin-top:8px">
@@ -924,6 +825,19 @@ function renderGreekPortfolio() {
     updateGreek({ globalIssue: e.target.value });
   });
 
+  // Click-to-cycle status
+  container.querySelectorAll('.clickable-greek-status').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const t = greek.texts.find(t => t.id === el.dataset.id);
+      if (!t) return;
+      const next = GREEK_TEXT_STATUSES[(GREEK_TEXT_STATUSES.indexOf(t.status) + 1) % GREEK_TEXT_STATUSES.length];
+      updateGreekText(el.dataset.id, { status: next });
+      schedulePush('greek', el.dataset.id);
+      renderGreekPortfolio();
+    });
+  });
+
   // Expand/collapse
   container.querySelectorAll('.greek-expand-btn').forEach(btn => {
     btn.addEventListener('click', e => {
@@ -946,9 +860,12 @@ function renderGreekPortfolio() {
   container.querySelectorAll('.greek-status-select').forEach(sel => {
     sel.addEventListener('change', e => {
       updateGreekText(e.target.dataset.id, { status: e.target.value });
+      schedulePush('greek', e.target.dataset.id);
       renderGreekPortfolio();
     });
   });
+
+  document.getElementById('btn-sync-notion-greek').addEventListener('click', syncGreekWithNotion);
 
   // Notes textareas
   container.querySelectorAll('.greek-notes-input').forEach(ta => {
@@ -961,10 +878,34 @@ function renderGreekPortfolio() {
 // ============================================================
 // NOTION SYNC
 // ============================================================
-function setSyncStatus(state, msg = '') {
-  const btn = document.getElementById('btn-sync-notion');
-  const lbl = document.getElementById('sync-status');
-  if (!btn || !lbl) return;
+const syncState = {
+  assignments: { pending: new Set(), timer: null },
+  projects:    { pending: new Set(), timer: null },
+  ee:          { pending: new Set(), timer: null },
+  greek:       { pending: new Set(), timer: null },
+};
+
+const SYNC_BTN_IDS = { assignments: 'btn-sync-notion', projects: 'btn-sync-notion-projects', ee: 'btn-sync-notion-ee', greek: 'btn-sync-notion-greek' };
+const SYNC_LBL_IDS = { assignments: 'sync-status',     projects: 'sync-status-projects',     ee: 'sync-status-ee',   greek: 'sync-status-greek' };
+function getSyncBtn(v) { return document.getElementById(SYNC_BTN_IDS[v]); }
+function getSyncLbl(v) { return document.getElementById(SYNC_LBL_IDS[v]); }
+
+function schedulePush(viewKey, itemId) {
+  syncState[viewKey].pending.add(itemId);
+  clearTimeout(syncState[viewKey].timer);
+  syncState[viewKey].timer = setTimeout(() => flushPushForView(viewKey), 2000);
+}
+
+async function flushPushForView(viewKey) {
+  const btn = getSyncBtn(viewKey), lbl = getSyncLbl(viewKey);
+  if (viewKey === 'assignments') await flushPushAssignments(btn, lbl);
+  else if (viewKey === 'projects') await flushPushProjects(btn, lbl);
+  else if (viewKey === 'ee')       await flushPushEE(btn, lbl);
+  else if (viewKey === 'greek')    await flushPushGreek(btn, lbl);
+}
+
+function setSyncStatus(state, btnEl, lblEl, msg = '') {
+  if (!btnEl || !lblEl) return;
   const states = {
     idle:    { text: '⟳ SYNC NOTION', color: '#555', label: '' },
     syncing: { text: '⟳ SYNCING…',    color: 'var(--accent)', label: 'WORKING…' },
@@ -972,15 +913,45 @@ function setSyncStatus(state, msg = '') {
     error:   { text: '⟳ SYNC NOTION', color: 'var(--status-blocked)', label: '✗ ' + msg },
   };
   const s = states[state] || states.idle;
-  btn.textContent    = s.text;
-  btn.style.color    = s.color;
-  btn.style.borderColor = s.color;
-  lbl.textContent    = s.label;
-  lbl.style.color    = s.color;
+  btnEl.textContent       = s.text;
+  btnEl.style.color       = s.color;
+  btnEl.style.borderColor = s.color;
+  lblEl.textContent       = s.label;
+  lblEl.style.color       = s.color;
 }
 
-async function syncWithNotion() {
-  setSyncStatus('syncing');
+async function flushPushAssignments(btnEl, lblEl) {
+  const state = syncState.assignments;
+  if (!state.pending.size) return;
+  const ids = [...state.pending];
+  state.pending.clear();
+  setSyncStatus('syncing', btnEl, lblEl);
+  try {
+    for (const id of ids) {
+      const t = tasks.find(t => t.id === id);
+      if (!t) continue;
+      if (t.notionId) {
+        await updateNotionTask(t.notionId, t);
+        if (t.body?.trim()) await updatePageBody(t.notionId, t.body).catch(err => console.error('Body push failed:', err));
+      } else {
+        const page = await createNotionTask(t);
+        if (page?.id) {
+          updateTask(t.id, { notionId: page.id });
+          if (t.body?.trim()) await updatePageBody(page.id, t.body).catch(err => console.error('Body push failed:', err));
+        }
+      }
+    }
+    setSyncStatus('success', btnEl, lblEl);
+    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
+  } catch (err) {
+    console.error('Auto-sync failed:', err);
+    setSyncStatus('error', btnEl, lblEl, err.message);
+  }
+}
+
+async function syncAssignmentsWithNotion() {
+  const btnEl = getSyncBtn('assignments'), lblEl = getSyncLbl('assignments');
+  setSyncStatus('syncing', btnEl, lblEl);
 
   try {
     // 1. Fetch all pages from Notion
@@ -1045,12 +1016,255 @@ async function syncWithNotion() {
       t.status !== 'DONE' || new Date(t.updatedAt).getTime() >= cutoff
     );
     setTasks(updated);
-    setSyncStatus('success');
-    setTimeout(() => setSyncStatus('idle'), 3000);
+    setSyncStatus('success', btnEl, lblEl);
+    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
     renderAndRefreshDash();
   } catch (err) {
     console.error('Notion sync failed:', err);
-    setSyncStatus('error', err.message);
+    setSyncStatus('error', btnEl, lblEl, err.message);
+  }
+}
+
+// ── Projects flush + sync ─────────────────────────────────────────────────
+
+async function flushPushProjects(btnEl, lblEl) {
+  const state = syncState.projects;
+  if (!state.pending.size) return;
+  const ids = [...state.pending];
+  state.pending.clear();
+  setSyncStatus('syncing', btnEl, lblEl);
+  try {
+    for (const id of ids) {
+      const p = projects.find(p => p.id === id);
+      if (!p) continue;
+      if (p.notionId) {
+        await updateNotionProject(p.notionId, p);
+      } else {
+        const page = await createNotionProject(p);
+        if (page?.id) updateProject(p.id, { notionId: page.id });
+      }
+    }
+    setSyncStatus('success', btnEl, lblEl);
+    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
+  } catch (err) {
+    console.error('Projects auto-sync failed:', err);
+    setSyncStatus('error', btnEl, lblEl, err.message);
+  }
+}
+
+async function syncProjectsWithNotion() {
+  const btnEl = getSyncBtn('projects'), lblEl = getSyncLbl('projects');
+  setSyncStatus('syncing', btnEl, lblEl);
+  try {
+    const notionPages = await fetchAllNotionProjects();
+    const localByNotionId = Object.fromEntries(
+      projects.filter(p => p.notionId).map(p => [p.notionId, p])
+    );
+    let updated = [...projects];
+
+    for (const page of notionPages) {
+      const remote = fromNotionProject(page);
+      const local  = localByNotionId[page.id];
+      if (local) {
+        const remoteTime = new Date(remote.notionUpdatedAt);
+        const localTime  = new Date(local.notionUpdatedAt || 0);
+        if (remoteTime >= localTime) {
+          updated = updated.map(p =>
+            p.id === local.id ? { ...p, ...remote, id: p.id, priority: p.priority } : p
+          );
+        } else {
+          await updateNotionProject(page.id, local);
+        }
+      } else {
+        updated = [...updated, {
+          id:       generateId('proj'),
+          priority: 'NORMAL',
+          ...remote,
+        }];
+      }
+    }
+
+    const needsPush = updated.filter(p => !p.notionId);
+    for (const proj of needsPush) {
+      const page = await createNotionProject(proj);
+      updated = updated.map(p => p.id === proj.id ? { ...p, notionId: page.id } : p);
+    }
+
+    updated.forEach(p => updateProject(p.id, p));
+    // Add truly new projects that don't exist yet
+    const existingIds = new Set(projects.map(p => p.id));
+    updated.filter(p => !existingIds.has(p.id)).forEach(p => createProject(p));
+
+    setSyncStatus('success', btnEl, lblEl);
+    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
+    renderPM();
+  } catch (err) {
+    console.error('Projects sync failed:', err);
+    setSyncStatus('error', btnEl, lblEl, err.message);
+  }
+}
+
+// ── EE flush + sync ────────────────────────────────────────────────────────
+
+async function flushPushEE(btnEl, lblEl) {
+  const state = syncState.ee;
+  if (!state.pending.size) return;
+  const ids = [...state.pending];
+  state.pending.clear();
+  setSyncStatus('syncing', btnEl, lblEl);
+  try {
+    for (const id of ids) {
+      const m = ee.milestones.find(m => m.id === id);
+      if (!m) continue;
+      if (m.notionId) {
+        await updateNotionMilestone(m.notionId, m);
+      } else {
+        const page = await createNotionMilestone(m);
+        if (page?.id) {
+          const updatedMilestones = ee.milestones.map(ms =>
+            ms.id === id ? { ...ms, notionId: page.id } : ms
+          );
+          updateEE({ milestones: updatedMilestones });
+        }
+      }
+    }
+    setSyncStatus('success', btnEl, lblEl);
+    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
+  } catch (err) {
+    console.error('EE auto-sync failed:', err);
+    setSyncStatus('error', btnEl, lblEl, err.message);
+  }
+}
+
+async function syncEEWithNotion() {
+  const btnEl = getSyncBtn('ee'), lblEl = getSyncLbl('ee');
+  setSyncStatus('syncing', btnEl, lblEl);
+  try {
+    const notionPages = await fetchAllNotionMilestones();
+    const localByNotionId = Object.fromEntries(
+      ee.milestones.filter(m => m.notionId).map(m => [m.notionId, m])
+    );
+    let updatedMilestones = [...ee.milestones];
+
+    for (const page of notionPages) {
+      const remote = fromNotionMilestone(page);
+      const local  = localByNotionId[page.id];
+      if (local) {
+        const remoteTime = new Date(remote.notionUpdatedAt);
+        const localTime  = new Date(local.notionUpdatedAt || 0);
+        if (remoteTime >= localTime) {
+          updatedMilestones = updatedMilestones.map(m =>
+            m.id === local.id ? { ...m, label: remote.label, done: remote.done, notionId: remote.notionId, notionUpdatedAt: remote.notionUpdatedAt } : m
+          );
+        } else {
+          await updateNotionMilestone(page.id, local);
+        }
+      } else {
+        updatedMilestones = [...updatedMilestones, {
+          id:    generateId('ee'),
+          ...remote,
+        }];
+      }
+    }
+
+    const needsPush = updatedMilestones.filter(m => !m.notionId);
+    for (const milestone of needsPush) {
+      const page = await createNotionMilestone(milestone);
+      updatedMilestones = updatedMilestones.map(m =>
+        m.id === milestone.id ? { ...m, notionId: page.id } : m
+      );
+    }
+
+    updateEE({ milestones: updatedMilestones });
+    setSyncStatus('success', btnEl, lblEl);
+    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
+    renderEETracker();
+  } catch (err) {
+    console.error('EE sync failed:', err);
+    setSyncStatus('error', btnEl, lblEl, err.message);
+  }
+}
+
+// ── Greek flush + sync ─────────────────────────────────────────────────────
+
+async function flushPushGreek(btnEl, lblEl) {
+  const state = syncState.greek;
+  if (!state.pending.size) return;
+  const ids = [...state.pending];
+  state.pending.clear();
+  setSyncStatus('syncing', btnEl, lblEl);
+  try {
+    for (const id of ids) {
+      const t = greek.texts.find(t => t.id === id);
+      if (!t) continue;
+      if (t.notionId) {
+        await updateNotionText(t.notionId, t);
+      } else {
+        const page = await createNotionText(t);
+        if (page?.id) {
+          const updatedTexts = greek.texts.map(tx =>
+            tx.id === id ? { ...tx, notionId: page.id } : tx
+          );
+          updateGreek({ texts: updatedTexts });
+        }
+      }
+    }
+    setSyncStatus('success', btnEl, lblEl);
+    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
+  } catch (err) {
+    console.error('Greek auto-sync failed:', err);
+    setSyncStatus('error', btnEl, lblEl, err.message);
+  }
+}
+
+async function syncGreekWithNotion() {
+  const btnEl = getSyncBtn('greek'), lblEl = getSyncLbl('greek');
+  setSyncStatus('syncing', btnEl, lblEl);
+  try {
+    const notionPages = await fetchAllNotionTexts();
+    const localByNotionId = Object.fromEntries(
+      greek.texts.filter(t => t.notionId).map(t => [t.notionId, t])
+    );
+    let updatedTexts = [...greek.texts];
+
+    for (const page of notionPages) {
+      const remote = fromNotionText(page);
+      const local  = localByNotionId[page.id];
+      if (local) {
+        const remoteTime = new Date(remote.notionUpdatedAt);
+        const localTime  = new Date(local.notionUpdatedAt || 0);
+        if (remoteTime >= localTime) {
+          updatedTexts = updatedTexts.map(t =>
+            t.id === local.id ? { ...t, title: remote.title, status: remote.status, notionId: remote.notionId, notionUpdatedAt: remote.notionUpdatedAt } : t
+          );
+        } else {
+          await updateNotionText(page.id, local);
+        }
+      } else {
+        updatedTexts = [...updatedTexts, {
+          id:        generateId('grk'),
+          wordCount: 0,
+          notes:     '',
+          ...remote,
+        }];
+      }
+    }
+
+    const needsPush = updatedTexts.filter(t => !t.notionId);
+    for (const text of needsPush) {
+      const page = await createNotionText(text);
+      updatedTexts = updatedTexts.map(t =>
+        t.id === text.id ? { ...t, notionId: page.id } : t
+      );
+    }
+
+    updateGreek({ texts: updatedTexts });
+    setSyncStatus('success', btnEl, lblEl);
+    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
+    renderGreekPortfolio();
+  } catch (err) {
+    console.error('Greek sync failed:', err);
+    setSyncStatus('error', btnEl, lblEl, err.message);
   }
 }
 
@@ -1059,20 +1273,18 @@ async function syncWithNotion() {
 // ============================================================
 const PM_STATUS_CYCLE = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
 const PM_BOARD_COLS   = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
+const PROJ_STATUS_ORDER = { ACTIVE: 0, PAUSED: 1, DONE: 2 };
 let pmSubView    = 'projects';
 let pmTicketMode = 'table';
 let pmFilterAssignee = '', pmFilterPriority = '', pmFilterStatus = '';
-
-function initPM() {
-  ensurePMSeed();
-}
+let projFilterStatus = '', projSortField = 'status', projSortDir = 'asc';
 
 function renderPM() {
-  const container = document.querySelector('main [data-view="dev-pm"]');
+  const container = document.querySelector('main [data-view="projects"]');
   if (!container) return;
 
   const activeId = getPMActiveProject();
-  const proj = getPMProjects().find(p => p.id === activeId);
+  const proj = projects.find(p => p.id === activeId);
 
   container.innerHTML = `
     <div class="view-toolbar" style="margin-bottom:0">
@@ -1105,26 +1317,70 @@ function renderPM() {
 }
 
 // PM PROJECTS
+function filteredSortedProjects(allTickets) {
+  let list = [...projects];
+  if (projFilterStatus) list = list.filter(p => p.status === projFilterStatus);
+  list.sort((a, b) => {
+    let va, vb;
+    if (projSortField === 'status') {
+      va = PROJ_STATUS_ORDER[a.status] ?? 99;
+      vb = PROJ_STATUS_ORDER[b.status] ?? 99;
+    } else if (projSortField === 'open') {
+      va = allTickets.filter(t => t.projectId === a.id && t.status !== 'DONE').length;
+      vb = allTickets.filter(t => t.projectId === b.id && t.status !== 'DONE').length;
+    } else {
+      va = (a[projSortField] || '').toLowerCase();
+      vb = (b[projSortField] || '').toLowerCase();
+    }
+    if (va < vb) return projSortDir === 'asc' ? -1 : 1;
+    if (va > vb) return projSortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+  return list;
+}
+
 function renderPMProjects(container) {
-  const pmProjects = getPMProjects();
-  const allTickets = getPMTickets();
-  const activeId   = getPMActiveProject();
+  const allTickets  = getPMTickets();
+  const activeId    = getPMActiveProject();
+  const statusColor = { ACTIVE: 'var(--accent)', PAUSED: '#555', DONE: 'var(--status-done)' };
+  const projList    = filteredSortedProjects(allTickets);
 
   container.innerHTML = `
-    <div class="section-header display-text" style="font-size:32px;margin-bottom:var(--spacing-md)">PROJECTS</div>
+    <div class="view-toolbar" style="margin-bottom:var(--spacing-md)">
+      <div class="filter-bar">
+        <select id="proj-filter-status" class="filter-select">
+          <option value="">ALL STATUS</option>
+          ${SIDE_QUEST_STATUSES.map(s => `<option value="${s}" ${projFilterStatus === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+        <select id="proj-sort-field" class="filter-select">
+          <option value="status">SORT: STATUS</option>
+          <option value="name">SORT: NAME</option>
+          <option value="open">SORT: OPEN TICKETS</option>
+        </select>
+        <select id="proj-sort-dir" class="filter-select">
+          <option value="asc">ASC ↑</option>
+          <option value="desc">DESC ↓</option>
+        </select>
+      </div>
+      <button id="btn-sync-notion-projects" class="action-btn" style="border-color:#555;color:#555">⟳ SYNC NOTION</button>
+      <span id="sync-status-projects" class="mono-label" style="color:#555"></span>
+    </div>
     <div class="project-grid">
-      ${pmProjects.map(p => {
-        const tickets = allTickets.filter(t => t.projectId === p.id);
-        const open    = tickets.filter(t => t.status !== 'DONE').length;
+      ${projList.map(p => {
+        const tickets  = allTickets.filter(t => t.projectId === p.id);
+        const open     = tickets.filter(t => t.status !== 'DONE').length;
         const isActive = p.id === activeId;
-        const updated  = tickets.reduce((l, t) => t.updatedAt > l ? t.updatedAt : l, p.createdAt);
+        const updated  = tickets.reduce((l, t) => t.updatedAt > l ? t.updatedAt : l, p.createdAt || new Date().toISOString());
+        const tags     = [...(p._notionCategory || []), ...(p._notionBusiness || [])];
         return `<div class="project-card ${isActive ? 'project-active' : ''}" data-id="${p.id}">
           <div class="project-phase-bar">
-            <span class="phase-badge phase-${p.phase}">${p.phase}</span>
-            ${isActive ? '<span class="active-badge">ACTIVE</span>' : ''}
+            <span class="mono-label" style="color:${statusColor[p.status] || '#555'}">● ${p.status || 'PAUSED'}</span>
+            ${p._notionLink ? `<a href="${esc(p._notionLink)}" target="_blank" rel="noopener" class="edit-btn" style="text-decoration:none;margin-left:auto" title="Open in Notion">↗</a>` : ''}
           </div>
           <div class="project-name display-text">${esc(p.name)}</div>
-          <div class="project-desc">${esc(p.description)}</div>
+          ${tags.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${tags.map(t => `<span class="due-chip">${esc(t)}</span>`).join('')}</div>` : ''}
+          ${p.lastAction ? `<div class="project-desc"><span class="mono-label" style="color:#555">LAST: </span>${esc(p.lastAction)}</div>` : ''}
+          ${p.nextStep   ? `<div class="project-desc"><span class="mono-label" style="color:#555">NEXT: </span>${esc(p.nextStep)}</div>` : ''}
           <div class="project-meta">
             <div class="project-stats">
               <span class="mono-label">${open} OPEN</span>
@@ -1142,8 +1398,22 @@ function renderPMProjects(container) {
             </div>
           </div>
         </div>`;
-      }).join('') || '<div class="empty-state" style="grid-column:1/-1">No projects yet.</div>'}
+      }).join('') || '<div class="empty-state" style="grid-column:1/-1">No projects match the current filters.</div>'}
     </div>`;
+
+  // Sync filter/sort dropdowns to current state
+  const projFilterStatusEl = document.getElementById('proj-filter-status');
+  const projSortFieldEl    = document.getElementById('proj-sort-field');
+  const projSortDirEl      = document.getElementById('proj-sort-dir');
+  if (projFilterStatusEl) projFilterStatusEl.value = projFilterStatus;
+  if (projSortFieldEl)    projSortFieldEl.value    = projSortField;
+  if (projSortDirEl)      projSortDirEl.value      = projSortDir;
+
+  projFilterStatusEl.addEventListener('change', e => { projFilterStatus = e.target.value; renderPM(); });
+  projSortFieldEl.addEventListener('change',    e => { projSortField    = e.target.value; renderPM(); });
+  projSortDirEl.addEventListener('change',      e => { projSortDir      = e.target.value; renderPM(); });
+
+  document.getElementById('btn-sync-notion-projects').addEventListener('click', syncProjectsWithNotion);
 
   container.querySelectorAll('.pm-set-active').forEach(btn => {
     btn.addEventListener('click', e => { e.stopPropagation(); setPMActiveProject(btn.dataset.id); renderPM(); });
@@ -1154,16 +1424,21 @@ function renderPMProjects(container) {
   container.querySelectorAll('.pm-edit-proj').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      const p = getPMProjects().find(p => p.id === btn.dataset.id);
+      const p = projects.find(p => p.id === btn.dataset.id);
       if (!p) return;
       openModal({
         title: 'EDIT PROJECT', submitLabel: 'SAVE',
         fields: [
-          { name: 'name',        label: 'PROJECT NAME', defaultValue: p.name },
-          { name: 'phase',       label: 'PHASE', type: 'select', defaultValue: p.phase, options: ['ALPHA', 'BETA', 'LAUNCH', 'MAINTENANCE'] },
-          { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false, defaultValue: p.description },
+          { name: 'name',       label: 'PROJECT NAME', defaultValue: p.name },
+          { name: 'status',     label: 'STATUS', type: 'select', defaultValue: p.status, options: SIDE_QUEST_STATUSES },
+          { name: 'lastAction', label: 'LAST ACTION', required: false, defaultValue: p.lastAction || '' },
+          { name: 'nextStep',   label: 'NEXT STEP', required: false, defaultValue: p.nextStep || '' },
         ],
-        onSubmit(data) { updatePMProject(btn.dataset.id, data); renderPM(); },
+        onSubmit(data) {
+          updateProject(btn.dataset.id, data);
+          schedulePush('projects', btn.dataset.id);
+          renderPM();
+        },
       });
     });
   });
@@ -1172,9 +1447,11 @@ function renderPMProjects(container) {
       e.stopPropagation();
       if (btn.dataset.confirm) {
         const id = btn.dataset.id;
-        deletePMProject(id);
+        const p = projects.find(p => p.id === id);
+        if (p?.notionId) archiveNotionProject(p.notionId).catch(err => console.error('Notion archive failed:', err));
+        deleteProject(id);
         if (getPMActiveProject() === id) {
-          const remaining = getPMProjects();
+          const remaining = projects.filter(p => p.id !== id);
           setPMActiveProject(remaining[0]?.id ?? null);
         }
         renderPM();
@@ -1193,11 +1470,16 @@ function openNewPMProjectModal() {
   openModal({
     title: 'NEW PROJECT',
     fields: [
-      { name: 'name',        label: 'PROJECT NAME' },
-      { name: 'phase',       label: 'PHASE', type: 'select', options: ['ALPHA', 'BETA', 'LAUNCH', 'MAINTENANCE'] },
-      { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false },
+      { name: 'name',       label: 'PROJECT NAME' },
+      { name: 'status',     label: 'STATUS', type: 'select', options: SIDE_QUEST_STATUSES },
+      { name: 'lastAction', label: 'LAST ACTION', required: false },
+      { name: 'nextStep',   label: 'NEXT STEP', required: false },
     ],
-    onSubmit(data) { createPMProject(data); renderPM(); },
+    onSubmit(data) {
+      const result = createProject(data);
+      schedulePush('projects', result.id);
+      renderPM();
+    },
   });
 }
 
@@ -1466,14 +1748,16 @@ function openNewPMMemberModal() {
 // ============================================================
 initModal();
 initAssignments();
-initPM();
+
+if (projects.length === 0)      syncProjectsWithNotion();
+if (ee.milestones.length === 0) syncEEWithNotion();
+if (greek.texts.length === 0)   syncGreekWithNotion();
 
 registerView('dashboard',       renderDashboard);
 registerView('assignments',     renderAssignments);
 registerView('ee-tracker',      renderEETracker);
-registerView('side-quests',     renderSideQuests);
 registerView('greek-portfolio', renderGreekPortfolio);
-registerView('dev-pm',          renderPM);
+registerView('projects',        renderPM);
 
 // Nav click handlers
 document.querySelectorAll('.nav-item[data-view]').forEach(item => {
