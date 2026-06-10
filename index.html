@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IB Dashboard 2025-26</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,24 +14,25 @@
   <!-- SIDEBAR -->
   <aside>
     <div class="brand-block">
-      <h1 class="display-text">IB<br>2025<br>26.</h1>
+      <div class="mono-label brand-kicker">DIPLOMA PROGRAMME // MISSION CONTROL</div>
+      <h1 class="display-text brand-title">IB<span class="brand-slash">/</span>26</h1>
     </div>
 
     <div class="meta-grid">
       <div class="meta-item">
-        <div class="mono-label" style="color:#888">Programme</div>
+        <div class="mono-label meta-key">Programme</div>
         <div class="meta-value">IB 2025-26</div>
       </div>
       <div class="meta-item">
-        <div class="mono-label" style="color:#888">Sprint</div>
+        <div class="mono-label meta-key">Week</div>
         <div id="meta-sprint" class="meta-value">—</div>
       </div>
       <div class="meta-item">
-        <div class="mono-label" style="color:#888">Date</div>
+        <div class="mono-label meta-key">Date</div>
         <div id="meta-date" class="meta-value">—</div>
       </div>
       <div class="meta-item">
-        <div class="mono-label" style="color:#888">Env</div>
+        <div class="mono-label meta-key">Env</div>
         <div class="meta-value">ATHENS</div>
       </div>
     </div>
@@ -36,48 +40,63 @@
     <ul class="nav-list">
       <li class="nav-item" data-view="dashboard">
         <span class="num">01</span>
-        <div>
-          <div class="display-text" style="font-size:24px">Dashboard</div>
-          <div class="mono-label">Overview</div>
+        <div class="nav-text">
+          <div class="display-text nav-label">Dashboard</div>
+          <div class="mono-label nav-sub">Overview</div>
         </div>
+        <span class="nav-arrow">&#x2192;</span>
       </li>
       <li class="nav-item" data-view="assignments">
         <span class="num">02</span>
-        <div>
-          <div class="display-text" style="font-size:24px">Assignments</div>
-          <div class="mono-label">Tasks &amp; Deadlines</div>
+        <div class="nav-text">
+          <div class="display-text nav-label">Assignments</div>
+          <div class="mono-label nav-sub">Tasks &amp; Deadlines</div>
         </div>
+        <span class="nav-arrow">&#x2192;</span>
       </li>
       <li class="nav-item" data-view="ee-tracker">
         <span class="num">03</span>
-        <div>
-          <div class="display-text" style="font-size:24px">EE Tracker</div>
-          <div class="mono-label">Extended Essay</div>
+        <div class="nav-text">
+          <div class="display-text nav-label">EE Tracker</div>
+          <div class="mono-label nav-sub">Extended Essay</div>
         </div>
+        <span class="nav-arrow">&#x2192;</span>
       </li>
       <li class="nav-item" data-view="greek-portfolio">
         <span class="num">04</span>
-        <div>
-          <div class="display-text" style="font-size:24px">Greek Portfolio</div>
-          <div class="mono-label">Language &amp; Culture</div>
+        <div class="nav-text">
+          <div class="display-text nav-label">Greek Portfolio</div>
+          <div class="mono-label nav-sub">Language &amp; Culture</div>
         </div>
+        <span class="nav-arrow">&#x2192;</span>
       </li>
       <li class="nav-item" data-view="projects">
         <span class="num">05</span>
-        <div>
-          <div class="display-text" style="font-size:24px">Projects</div>
-          <div class="mono-label">Projects &amp; Tickets</div>
+        <div class="nav-text">
+          <div class="display-text nav-label">Projects</div>
+          <div class="mono-label nav-sub">Projects &amp; Tickets</div>
         </div>
+        <span class="nav-arrow">&#x2192;</span>
       </li>
     </ul>
+
+    <div class="sidebar-foot">
+      <div class="exam-chip">
+        <span class="mono-label exam-chip-key">IB EXAMS</span>
+        <span class="display-text exam-chip-num" id="sidebar-countdown-num">—</span>
+      </div>
+    </div>
   </aside>
 
   <!-- MAIN -->
   <main>
     <header>
-      <div class="breadcrumbs" id="header-breadcrumb">HOME / DASHBOARD</div>
+      <div class="header-left">
+        <div class="breadcrumbs mono-label" id="header-breadcrumb">HOME / DASHBOARD</div>
+        <div class="display-text header-title" id="header-title">Dashboard</div>
+      </div>
       <div class="user-status">
-        <span class="mono-label" style="color:#888">PROGRAMME</span>
+        <span class="mono-label header-key">PROGRAMME</span>
         <span class="role">IB DIPLOMA</span>
       </div>
     </header>

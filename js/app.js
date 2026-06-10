@@ -170,10 +170,22 @@ function getISOWeek(d = new Date()) {
   return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
 }
 
+const VIEW_TITLES = {
+  'dashboard':       'Dashboard',
+  'assignments':     'Assignments',
+  'ee-tracker':      'EE Tracker',
+  'greek-portfolio': 'Greek Portfolio',
+  'projects':        'Projects',
+};
+
 function updateMeta(viewId) {
   const crumb = document.getElementById('header-breadcrumb');
   if (crumb && viewId) {
     crumb.textContent = 'HOME / ' + viewId.toUpperCase().replace(/-/g, ' ');
+  }
+  const title = document.getElementById('header-title');
+  if (title && viewId) {
+    title.textContent = VIEW_TITLES[viewId] || viewId.replace(/-/g, ' ');
   }
 }
 
@@ -214,28 +226,52 @@ function renderDashboard() {
   notDone.forEach(t => { if (t.subject in subjectLoad) subjectLoad[t.subject]++; });
   const maxLoad = Math.max(1, ...Object.values(subjectLoad));
 
-  // Exam countdown
+  // Exam countdown + academic year progress
   const examDate = new Date('2026-05-05');
   const daysLeft = Math.ceil((examDate - new Date()) / 86400000);
+  const examsPast = daysLeft < 0;
+  const yearStart = new Date('2025-09-01');
+  const yearPct = Math.min(100, Math.max(0,
+    Math.round(((Date.now() - yearStart) / (examDate - yearStart)) * 100)
+  ));
+
+  // Deadline ticker: everything due within 14 days, soonest first
+  const upcoming = notDone
+    .filter(t => {
+      const d = daysUntil(t.deadline);
+      return d !== null && d >= 0 && d <= 14;
+    })
+    .sort((a, b) => a.deadline.localeCompare(b.deadline));
+  const tickerItems = (upcoming.length ? upcoming.map(t => {
+    const d = daysUntil(t.deadline);
+    const dLabel = d === 0 ? '<span class="hot">DUE TODAY</span>'
+      : d <= 3 ? `<span class="hot">${d}D LEFT</span>`
+      : `${d}D LEFT`;
+    return `<span class="ticker-item"><span class="sep">&#x25B6;</span>${esc(t.subject)} — ${esc(t.title)} — ${dLabel}</span>`;
+  }) : ['<span class="ticker-item"><span class="sep">&#x25B6;</span>NO DEADLINES IN THE NEXT 14 DAYS — CLEAR RUNWAY</span>']).join('');
+
+  const stats = [
+    { v: tasks.length,    l: 'TOTAL TASKS',   cls: '' },
+    { v: overdue.length,  l: 'OVERDUE',       cls: 'stat-danger' },
+    { v: thisWeek.length, l: 'DUE THIS WEEK', cls: 'stat-review' },
+    { v: done.length,     l: 'DONE',          cls: 'stat-done' },
+  ];
 
   container.innerHTML = `
+    <div class="ticker-wrap" aria-hidden="true">
+      <div class="ticker">
+        <div class="ticker-group">${tickerItems}</div>
+        <div class="ticker-group">${tickerItems}</div>
+      </div>
+    </div>
+
     <div class="stat-row">
-      <div class="stat-card">
-        <div class="stat-value display-text">${tasks.length}</div>
-        <div class="mono-label stat-label">TOTAL</div>
-      </div>
-      <div class="stat-card stat-danger">
-        <div class="stat-value display-text">${overdue.length}</div>
-        <div class="mono-label stat-label">OVERDUE</div>
-      </div>
-      <div class="stat-card stat-review">
-        <div class="stat-value display-text">${thisWeek.length}</div>
-        <div class="mono-label stat-label">THIS WEEK</div>
-      </div>
-      <div class="stat-card stat-done">
-        <div class="stat-value display-text">${done.length}</div>
-        <div class="mono-label stat-label">DONE</div>
-      </div>
+      ${stats.map((s, i) => `
+        <div class="stat-card ${s.cls}">
+          <div class="stat-index mono-label">0${i + 1}</div>
+          <div class="stat-value display-text">${s.v}</div>
+          <div class="mono-label stat-label">${s.l}</div>
+        </div>`).join('')}
     </div>
 
     <div class="dashboard-grid">
@@ -248,11 +284,10 @@ function renderDashboard() {
           ${urgent.length ? urgent.map(t => {
             const days = daysUntil(t.deadline);
             const isOverdue = days !== null && days < 0 && t.status !== 'DONE';
-            const overdueCls = isOverdue ? 'style="border-left:2px solid var(--status-blocked);padding-left:8px"' : '';
             const daysLabel = days === null ? '' : isOverdue
-              ? `<span class="due-chip" style="color:var(--status-blocked)">${Math.abs(days)}d OVERDUE</span>`
+              ? `<span class="due-chip chip-danger">${Math.abs(days)}d OVERDUE</span>`
               : `<span class="due-chip">${days}d LEFT</span>`;
-            return `<div class="task-row" ${overdueCls}>
+            return `<div class="task-row ${isOverdue ? 'overdue-row' : ''}">
               <div class="task-title">${esc(t.title)} ${daysLabel}</div>
               <div>${subjectBadge(t.subject)}</div>
               <div class="priority-badge p-${t.priority}">${t.priority}</div>
@@ -284,12 +319,14 @@ function renderDashboard() {
 
       <div class="notice-board">
         <div class="notice-headline">
-          <span class="filled">IB EXAMS IN</span>
-          <span>${daysLeft}</span>
-          <span>DAYS</span>
+          ${examsPast
+            ? `<span class="filled">IB EXAMS</span><span>COMPLETE</span>`
+            : `<span class="filled">IB EXAMS IN</span><span>${daysLeft}</span><span>DAYS</span>`}
         </div>
+        <div class="notice-progress"><div class="notice-progress-fill" style="width:${yearPct}%"></div></div>
         <div class="notice-footer">
           <span>IB DIPLOMA — 2025/26</span>
+          <span>YEAR ${yearPct}% ELAPSED</span>
           <span>${new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()}</span>
         </div>
       </div>
@@ -313,8 +350,8 @@ function initAssignments() {
   container.innerHTML = `
     <div class="view-toolbar">
       <div class="view-toggle">
-        <button id="btn-assign-table" class="toggle-btn view-active">TABLE VIEW</button>
-        <button id="btn-assign-board" class="toggle-btn">BOARD VIEW</button>
+        <button id="btn-assign-table" class="toggle-btn view-active">TABLE</button>
+        <button id="btn-assign-board" class="toggle-btn">BOARD</button>
       </div>
       <div class="filter-bar">
         <select id="filter-subject" class="filter-select">
@@ -344,8 +381,8 @@ function initAssignments() {
         </select>
       </div>
       <button id="btn-new-task" class="action-btn">+ NEW TASK</button>
-      <button id="btn-sync-notion" class="action-btn" style="border-color:#555;color:#555">⟳ SYNC NOTION</button>
-      <span id="sync-status" class="mono-label" style="color:#555"></span>
+      <button id="btn-sync-notion" class="action-btn ghost">⟳ SYNC NOTION</button>
+      <span id="sync-status" class="mono-label sync-label"></span>
     </div>
     <div id="task-table-container"></div>
     <div id="task-board-container" class="board-container board-5col" style="display:none"></div>`;
@@ -436,7 +473,7 @@ function renderAssignments() {
 }
 
 function renderAssignmentTable(list, container) {
-  const cols = '8px 1fr 140px 80px 90px 80px 80px';
+  const cols = '12px 1fr 150px 90px 80px 110px 70px';
   container.innerHTML = `
     <div class="task-row table-header" style="grid-template-columns:${cols}">
       <div></div>
@@ -451,16 +488,16 @@ function renderAssignmentTable(list, container) {
       const days = daysUntil(t.deadline);
       const overdue = days !== null && days < 0 && t.status !== 'DONE';
       const daysDisplay = days === null ? '—'
-        : overdue ? `<span style="color:var(--status-blocked)">${days}d</span>`
-        : `${days}d`;
-      return `<div class="task-row assign-row" data-id="${t.id}" style="grid-template-columns:${cols}">
+        : overdue ? `<span class="due-chip chip-danger">${Math.abs(days)}d OVER</span>`
+        : `<span class="due-chip">${days}d</span>`;
+      return `<div class="task-row assign-row ${overdue ? 'overdue-row' : ''}" data-id="${t.id}" style="grid-template-columns:${cols}">
         <div class="priority-dot p-dot-${t.priority} clickable-task-priority" data-id="${t.id}" title="Click to cycle priority (${t.priority})" style="cursor:pointer"></div>
         <div class="task-title">${esc(t.title)}
           ${t.notes ? `<span class="due-chip" title="${esc(t.notes)}">NOTE</span>` : ''}
         </div>
         <div>${subjectBadge(t.subject)}</div>
         <div class="task-assignee">${fmtDate(t.deadline)}</div>
-        <div class="task-assignee">${daysDisplay}</div>
+        <div>${daysDisplay}</div>
         <div class="status-badge s-${t.status} clickable-task-status" data-id="${t.id}" title="Click to cycle status" style="cursor:pointer">${fmtStatus(t.status)}</div>
         <div class="ticket-actions">
           <button class="edit-btn edit-task-btn" data-id="${t.id}" title="Edit">&#x270E;</button>
@@ -537,7 +574,7 @@ function renderAssignmentBoard(list, container) {
           const days = daysUntil(t.deadline);
           const isOverdue = days !== null && days < 0 && t.status !== 'DONE';
           const daysChip = days !== null
-            ? `<span class="due-chip" style="${isOverdue ? 'color:var(--status-blocked)' : ''}">${isOverdue ? Math.abs(days) + 'd OVERDUE' : days < 0 ? Math.abs(days) + 'd ago' : days + 'd LEFT'}</span>`
+            ? `<span class="due-chip ${isOverdue ? 'chip-danger' : ''}">${isOverdue ? Math.abs(days) + 'd OVERDUE' : days < 0 ? Math.abs(days) + 'd ago' : days + 'd LEFT'}</span>`
             : '';
           return `<div class="board-card s-border-${t.status}" draggable="true" data-id="${t.id}">
             <div class="card-title-row">
@@ -643,58 +680,61 @@ function renderEETracker() {
   const doneMilestones = ee.milestones.filter(m => m.done).length;
 
   container.innerHTML = `
-    <div class="view-toolbar" style="margin-bottom:var(--spacing-md)">
-      <div class="section-header display-text" style="border:none;margin:0">
-        EE TRACKER <span class="tag">EXTENDED ESSAY</span>
-      </div>
-      <button id="btn-sync-notion-ee" class="action-btn" style="border-color:#555;color:#555">⟳ SYNC NOTION</button>
-      <span id="sync-status-ee" class="mono-label" style="color:#555"></span>
+    <div class="view-toolbar">
+      <div class="view-context mono-label">EXTENDED ESSAY — 4,000 WORD TARGET</div>
+      <button id="btn-sync-notion-ee" class="action-btn ghost">⟳ SYNC NOTION</button>
+      <span id="sync-status-ee" class="mono-label sync-label"></span>
     </div>
 
-    <div class="ee-grid">
-      <!-- Word count -->
-      <div class="data-section" style="margin-bottom:var(--spacing-lg)">
-        <div class="mono-label" style="color:#555;margin-bottom:8px">WORD COUNT</div>
-        <div style="display:flex;align-items:center;gap:var(--spacing-md);margin-bottom:12px">
-          <input type="number" id="ee-wordcount" class="modal-input" style="width:120px;font-size:24px;font-family:var(--font-display)"
-            value="${wordCount}" min="0" max="4000">
-          <span class="mono-label" style="color:#555">/ 4000 WORDS</span>
-          <span class="mono-label" style="color:var(--accent)">${pct}%</span>
+    <div class="ee-layout">
+      <div class="ee-left">
+        <!-- Draft progress -->
+        <div class="data-section">
+          <div class="panel-header">
+            <span class="panel-label mono-label">DRAFT PROGRESS</span>
+            <span class="tag">${wordCount} / 4000</span>
+          </div>
+          <div class="ee-percent display-text">${pct}<span>%</span></div>
+          <div class="progress-track">
+            <div id="ee-progress-bar" class="progress-fill" style="width:${pct}%"></div>
+          </div>
+          <div class="ee-wc-row">
+            <input type="number" id="ee-wordcount" class="ee-wc-input" value="${wordCount}" min="0" max="4000">
+            <span class="mono-label">/ 4000 WORDS</span>
+          </div>
         </div>
-        <div class="workload-bar-wrap" style="height:8px;background:#222">
-          <div id="ee-progress-bar" class="workload-bar" style="width:${pct}%;height:100%"></div>
+
+        <!-- Meeting log -->
+        <div class="data-section">
+          <div class="panel-header">
+            <span class="panel-label mono-label">SUPERVISOR MEETING LOG</span>
+            <button id="btn-add-meeting" class="action-btn sm">+ ADD</button>
+          </div>
+          <div class="ee-meeting-list">
+            ${ee.meetings.length ? ee.meetings.map(m => `
+              <div class="ee-meeting">
+                <span class="due-chip">${fmtDate(m.date)}</span>
+                <span class="ee-meeting-notes">${esc(m.notes)}</span>
+              </div>`).join('')
+            : '<div class="empty-state">No meetings logged yet.</div>'}
+          </div>
         </div>
       </div>
 
       <!-- Milestones -->
-      <div class="data-section" style="margin-bottom:var(--spacing-lg)">
-        <div class="section-header display-text" style="font-size:24px">
-          MILESTONES
-          <span class="tag">${doneMilestones}/${ee.milestones.length}</span>
-        </div>
-        <div class="task-list">
-          ${ee.milestones.map(m => `
-            <div class="task-row" style="grid-template-columns:24px 1fr">
-              <input type="checkbox" class="ee-milestone-check" data-id="${m.id}" ${m.done ? 'checked' : ''}
-                style="accent-color:var(--accent);width:16px;height:16px;cursor:pointer">
-              <span style="${m.done ? 'text-decoration:line-through;color:#444' : ''}">${esc(m.label)}</span>
-            </div>`).join('')}
-        </div>
-      </div>
-
-      <!-- Meeting log -->
       <div class="data-section">
-        <div class="section-header display-text" style="font-size:24px">
-          MEETING LOG
-          <button id="btn-add-meeting" class="action-btn" style="font-size:10px">+ ADD</button>
+        <div class="section-header display-text">
+          MILESTONES
+          <span class="tag">${doneMilestones}/${ee.milestones.length} DONE</span>
         </div>
-        <div class="task-list">
-          ${ee.meetings.length ? ee.meetings.map(m => `
-            <div class="task-row" style="grid-template-columns:90px 1fr">
-              <span class="mono-label" style="color:#555">${fmtDate(m.date)}</span>
-              <span style="font-size:13px;color:#aaa">${esc(m.notes)}</span>
-            </div>`).join('')
-          : '<div class="empty-state">No meetings logged yet.</div>'}
+        <div class="ee-timeline">
+          ${ee.milestones.length ? ee.milestones.map((m, i) => `
+            <label class="ee-milestone ${m.done ? 'is-done' : ''}">
+              <input type="checkbox" class="ee-milestone-check" data-id="${m.id}" ${m.done ? 'checked' : ''}>
+              <span class="ee-milestone-num display-text">${String(i + 1).padStart(2, '0')}</span>
+              <span class="ee-milestone-label">${esc(m.label)}</span>
+            </label>`).join('')
+          : '<div class="empty-state">No milestones yet — sync with Notion.</div>'}
         </div>
       </div>
     </div>`;
@@ -703,9 +743,7 @@ function renderEETracker() {
   document.getElementById('ee-wordcount').addEventListener('change', e => {
     const val = parseInt(e.target.value, 10) || 0;
     updateEE({ wordCount: val });
-    const newPct = Math.min(100, Math.round((val / 4000) * 100));
-    const bar = document.getElementById('ee-progress-bar');
-    if (bar) bar.style.width = newPct + '%';
+    renderEETracker();
   });
 
   // Milestone checkboxes
@@ -742,82 +780,64 @@ function renderEETracker() {
 // ============================================================
 // GREEK PORTFOLIO
 // ============================================================
-const expandedTexts = new Set();
-
 function renderGreekPortfolio() {
   const container = document.querySelector('main [data-view="greek-portfolio"]');
   if (!container) return;
 
+  const slots = Math.max(4, greek.texts.length);
   const finalCount = greek.texts.filter(t => t.status === 'FINAL').length;
-  const progressPct = Math.round((finalCount / 4) * 100);
-
-  const statusColor = { DRAFT: '#555', REVISED: 'var(--status-review)', FINAL: 'var(--status-done)' };
+  const segments = greek.texts.map(t =>
+    `<div class="greek-seg seg-${t.status}" title="${esc(t.title)} — ${esc(t.status)}"></div>`
+  ).join('') + '<div class="greek-seg"></div>'.repeat(slots - greek.texts.length);
 
   container.innerHTML = `
-    <div class="view-toolbar" style="margin-bottom:var(--spacing-lg)">
-      <div class="section-header display-text" style="border:none;margin:0">
-        GREEK PORTFOLIO <span class="tag">LANGUAGE B HL</span>
-      </div>
-      <button id="btn-sync-notion-greek" class="action-btn" style="border-color:#555;color:#555">⟳ SYNC NOTION</button>
-      <span id="sync-status-greek" class="mono-label" style="color:#555"></span>
+    <div class="view-toolbar">
+      <div class="view-context mono-label">LANGUAGE B HL — ORAL PORTFOLIO</div>
+      <button id="btn-sync-notion-greek" class="action-btn ghost">⟳ SYNC NOTION</button>
+      <span id="sync-status-greek" class="mono-label sync-label"></span>
     </div>
 
-    <!-- Global Issue -->
-    <div class="data-section" style="margin-bottom:var(--spacing-lg)">
-      <div class="mono-label" style="color:#555;margin-bottom:8px">GLOBAL ISSUE</div>
-      <textarea id="greek-global" class="modal-input modal-textarea" rows="2"
-        style="font-size:15px;border:1px solid #2a2a2a;padding:10px;background:#1a1a1a">${esc(greek.globalIssue)}</textarea>
-    </div>
-
-    <!-- Progress bar -->
-    <div class="data-section" style="margin-bottom:var(--spacing-lg)">
-      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-        <div class="mono-label" style="color:#555">PORTFOLIO PROGRESS</div>
-        <div class="mono-label" style="color:var(--status-done)">${finalCount}/4 FINAL</div>
+    <div class="greek-top">
+      <!-- Global Issue -->
+      <div class="data-section">
+        <span class="panel-label mono-label">GLOBAL ISSUE</span>
+        <textarea id="greek-global" class="issue-input" rows="3"
+          placeholder="Define the global issue connecting your portfolio texts…">${esc(greek.globalIssue)}</textarea>
       </div>
-      <div class="workload-bar-wrap" style="height:8px;background:#222">
-        <div class="workload-bar" style="width:${progressPct}%;height:100%;background:var(--status-done)"></div>
+
+      <!-- Progress -->
+      <div class="data-section">
+        <span class="panel-label mono-label">PORTFOLIO PROGRESS</span>
+        <div class="greek-progress-num display-text">${finalCount}<span>/${slots}</span></div>
+        <div class="greek-segments">${segments}</div>
+        <span class="mono-label panel-foot">TEXTS FINALISED</span>
       </div>
     </div>
 
     <!-- Texts -->
-    <div class="section-header display-text" style="font-size:28px;margin-bottom:var(--spacing-md)">
-      TEXTS
-    </div>
-    <div id="greek-texts-list" class="task-list">
-      ${greek.texts.map(t => {
-        const isExpanded = expandedTexts.has(t.id);
-        return `<div class="task-row greek-text-row" data-id="${t.id}"
-          style="grid-template-columns:1fr 80px 90px 32px;flex-direction:column;height:auto;display:grid;align-items:center">
-          <div class="task-title">${esc(t.title)}</div>
-          <div>
-            ${t.wordCount ? `<span class="due-chip">${t.wordCount}w</span>` : ''}
+    <div class="greek-grid">
+      ${greek.texts.length ? greek.texts.map((t, i) => `
+        <div class="greek-card seg-border-${t.status}">
+          <div class="greek-card-head">
+            <span class="greek-card-index display-text">${String(i + 1).padStart(2, '0')}</span>
+            <span class="status-badge s-greek-${t.status}">${esc(t.status)}</span>
           </div>
-          <div class="status-badge clickable-greek-status" data-id="${t.id}" style="color:${statusColor[t.status] || '#555'};cursor:pointer" title="Click to cycle status">${esc(t.status)}</div>
-          <button class="edit-btn greek-expand-btn" data-id="${t.id}" title="Expand">${isExpanded ? '▲' : '▼'}</button>
-          ${isExpanded ? `<div class="greek-text-detail" data-id="${t.id}"
-            style="grid-column:1/-1;padding:var(--spacing-sm) 0;border-top:1px solid #222;margin-top:8px">
-            <div style="display:flex;gap:var(--spacing-md);margin-bottom:var(--spacing-sm)">
-              <div style="flex:1">
-                <div class="mono-label" style="color:#555;margin-bottom:4px">WORD COUNT</div>
-                <input type="number" class="modal-input greek-wc-input" data-id="${t.id}"
-                  value="${t.wordCount}" min="0" style="width:100px">
-              </div>
-              <div>
-                <div class="mono-label" style="color:#555;margin-bottom:4px">STATUS</div>
-                <select class="filter-select greek-status-select" data-id="${t.id}">
-                  ${GREEK_TEXT_STATUSES.map(s => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
-                </select>
-              </div>
-            </div>
-            <div>
-              <div class="mono-label" style="color:#555;margin-bottom:4px">NOTES</div>
-              <textarea class="modal-input greek-notes-input" data-id="${t.id}" rows="2"
-                style="background:#1a1a1a;border:1px solid #2a2a2a;padding:8px">${esc(t.notes)}</textarea>
-            </div>
-          </div>` : ''}
-        </div>`;
-      }).join('')}
+          <div class="greek-card-title">${esc(t.title)}</div>
+          <div class="greek-stepper">
+            ${GREEK_TEXT_STATUSES.map(s => `
+              <button class="greek-status-step ${t.status === s ? 'step-active' : ''}"
+                data-id="${t.id}" data-status="${s}">${s}</button>`).join('')}
+          </div>
+          <div class="greek-card-fields">
+            <label class="mono-label">WORDS
+              <input type="number" class="greek-wc-input" data-id="${t.id}" value="${t.wordCount || 0}" min="0">
+            </label>
+            <label class="mono-label">NOTES
+              <textarea class="greek-notes-input" data-id="${t.id}" rows="2" placeholder="—">${esc(t.notes || '')}</textarea>
+            </label>
+          </div>
+        </div>`).join('')
+      : '<div class="empty-state">No texts yet — sync with Notion to pull your portfolio.</div>'}
     </div>`;
 
   // Global issue auto-save
@@ -825,25 +845,11 @@ function renderGreekPortfolio() {
     updateGreek({ globalIssue: e.target.value });
   });
 
-  // Click-to-cycle status
-  container.querySelectorAll('.clickable-greek-status').forEach(el => {
-    el.addEventListener('click', e => {
-      e.stopPropagation();
-      const t = greek.texts.find(t => t.id === el.dataset.id);
-      if (!t) return;
-      const next = GREEK_TEXT_STATUSES[(GREEK_TEXT_STATUSES.indexOf(t.status) + 1) % GREEK_TEXT_STATUSES.length];
-      updateGreekText(el.dataset.id, { status: next });
-      schedulePush('greek', el.dataset.id);
-      renderGreekPortfolio();
-    });
-  });
-
-  // Expand/collapse
-  container.querySelectorAll('.greek-expand-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const id = btn.dataset.id;
-      if (expandedTexts.has(id)) { expandedTexts.delete(id); } else { expandedTexts.add(id); }
+  // Status stepper — click a state to set it directly
+  container.querySelectorAll('.greek-status-step').forEach(btn => {
+    btn.addEventListener('click', () => {
+      updateGreekText(btn.dataset.id, { status: btn.dataset.status });
+      schedulePush('greek', btn.dataset.id);
       renderGreekPortfolio();
     });
   });
@@ -852,15 +858,6 @@ function renderGreekPortfolio() {
   container.querySelectorAll('.greek-wc-input').forEach(input => {
     input.addEventListener('change', e => {
       updateGreekText(e.target.dataset.id, { wordCount: parseInt(e.target.value, 10) || 0 });
-      renderGreekPortfolio();
-    });
-  });
-
-  // Status selects
-  container.querySelectorAll('.greek-status-select').forEach(sel => {
-    sel.addEventListener('change', e => {
-      updateGreekText(e.target.dataset.id, { status: e.target.value });
-      schedulePush('greek', e.target.dataset.id);
       renderGreekPortfolio();
     });
   });
@@ -1293,8 +1290,8 @@ function renderPM() {
         <button class="toggle-btn pm-tab ${pmSubView === 'tickets' ? 'view-active' : ''}" data-tab="tickets">TICKETS</button>
         <button class="toggle-btn pm-tab ${pmSubView === 'team' ? 'view-active' : ''}" data-tab="team">TEAM</button>
       </div>
-      <div style="display:flex;align-items:center;gap:var(--spacing-sm)">
-        ${proj ? `<span class="mono-label" style="color:#555">ACTIVE: <span style="color:var(--accent)">${esc(proj.name)}</span></span>` : ''}
+      <div style="display:flex;align-items:center;gap:var(--spacing-sm);margin-left:auto">
+        ${proj ? `<span class="mono-label sync-label">ACTIVE: <span style="color:var(--accent)">${esc(proj.name)}</span></span>` : ''}
         <button id="btn-pm-new" class="action-btn">+ NEW ${pmSubView === 'projects' ? 'PROJECT' : pmSubView === 'tickets' ? 'TICKET' : 'MEMBER'}</button>
       </div>
     </div>
@@ -1362,8 +1359,8 @@ function renderPMProjects(container) {
           <option value="desc">DESC ↓</option>
         </select>
       </div>
-      <button id="btn-sync-notion-projects" class="action-btn" style="border-color:#555;color:#555">⟳ SYNC NOTION</button>
-      <span id="sync-status-projects" class="mono-label" style="color:#555"></span>
+      <button id="btn-sync-notion-projects" class="action-btn ghost">⟳ SYNC NOTION</button>
+      <span id="sync-status-projects" class="mono-label sync-label"></span>
     </div>
     <div class="project-grid">
       ${projList.map(p => {
@@ -1496,8 +1493,8 @@ function renderPMTickets(container) {
   container.innerHTML = `
     <div class="view-toolbar" style="margin-bottom:var(--spacing-md)">
       <div class="view-toggle">
-        <button id="pm-btn-table" class="toggle-btn ${pmTicketMode === 'table' ? 'view-active' : ''}">TABLE VIEW</button>
-        <button id="pm-btn-board" class="toggle-btn ${pmTicketMode === 'board' ? 'view-active' : ''}">BOARD VIEW</button>
+        <button id="pm-btn-table" class="toggle-btn ${pmTicketMode === 'table' ? 'view-active' : ''}">TABLE</button>
+        <button id="pm-btn-board" class="toggle-btn ${pmTicketMode === 'board' ? 'view-active' : ''}">BOARD</button>
       </div>
       <div class="filter-bar">
         <select id="pm-filter-assignee" class="filter-select">
@@ -1768,5 +1765,12 @@ document.querySelectorAll('.nav-item[data-view]').forEach(item => {
 document.getElementById('meta-sprint').textContent = 'W' + getISOWeek();
 document.getElementById('meta-date').textContent =
   new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+// Sidebar exam countdown
+const examCountdownEl = document.getElementById('sidebar-countdown-num');
+if (examCountdownEl) {
+  const examDays = Math.ceil((new Date('2026-05-05') - new Date()) / 86400000);
+  examCountdownEl.textContent = examDays >= 0 ? `T-${examDays}` : 'DONE';
+}
 
 initRouter('dashboard');

@@ -39,11 +39,11 @@ The app uses ES modules with two JS files and one CSS file. No framework, bundle
 - ROUTER: hash-based, `registerView(id, fn)` + `navigateTo(id)` + `activateView(id)`. Nav items use `data-view`. View containers in `<main>` also use `data-view`; router selects them with `main [data-view]` to avoid collision.
 - MODAL: single shared overlay (`#modal-overlay` / `#modal-box`). `openModal({ title, fields, onSubmit })`
 - HELPERS: `esc()`, `fmtStatus()`, `fmtDate()`, `daysUntil()`, `subjectSlug()`, `subjectBadge()`, `getISOWeek()`, `updateMeta()`
-- DASHBOARD: `renderDashboard()` — stat row, urgent list, subject load bars, exam countdown
+- DASHBOARD: `renderDashboard()` — deadline ticker, stat row, urgent list, subject load bars, exam countdown + year progress
 - ASSIGNMENTS: `initAssignments()` (injects toolbar into container), `renderAssignments()`, table/board toggle, task CRUD modals
-- EE TRACKER: `renderEETracker()` — word count + progress bar, milestone checkboxes, meeting log
-- SIDE QUESTS: `renderSideQuests()` — project table with CRUD
-- GREEK PORTFOLIO: `renderGreekPortfolio()` — global issue, 4 text rows (expandable), progress bar
+- EE TRACKER: `renderEETracker()` — percent display + word count, milestone timeline checkboxes, supervisor meeting log
+- GREEK PORTFOLIO: `renderGreekPortfolio()` — global issue, progress segments, text cards with status stepper / word count / notes
+- DEV PM: `renderPM()` — projects / tickets / team tabs with CRUD
 - BOOT: `initModal()`, `initAssignments()`, `registerView()` calls, nav listeners, meta-grid init, `initRouter('dashboard')`
 
 ## Data Model
@@ -64,25 +64,45 @@ Enum values:
 
 ## Design System
 
+Industrial brutalist "mission control": hard edges (no border radius), hard offset
+shadows, stencil display type, lime signal color on near-black layered surfaces.
+Webfonts loaded from Google Fonts in `index.html` (Archivo Black / Space Grotesk /
+JetBrains Mono) with local fallbacks (Impact / Helvetica / monospace).
+
 Defined in `style.css` CSS variables. Key tokens:
 
 ```
 --accent: #E8FF47          (lime yellow — primary CTA, active nav, section underlines)
+--bg-0 … --bg-3            (surface ladder: sidebar → canvas → panels → raised cards/inputs)
+--line-1 … --line-3        (border ladder)
+--ink-1 … --ink-3          (text ladder: primary → secondary → muted)
 --status-blocked: #FF4747
 --status-in-progress: var(--accent)
 --status-review: #47C3FF
 --status-done: #47FF8A
---font-display: Impact      (section headers, brand, stat numbers)
+--shadow-hard / --shadow-hard-sm   (offset box shadows on panels/cards/buttons)
+--hazard                   (diagonal red striping — overdue rows, blocked cards)
+--font-display: Archivo Black / Impact   (headers, brand, stat numbers, big metrics)
+--font-mono: JetBrains Mono              (labels, chips, badges, buttons)
 ```
 
 CSS class conventions:
-- `.s-{STATUS}` — status text color (e.g. `.s-BLOCKED`, `.s-IN_PROGRESS`)
-- `.p-{PRIORITY}` — priority text color (e.g. `.p-CRITICAL`)
+- `.s-{STATUS}` — status chip color (e.g. `.s-BLOCKED`); `.status-badge` renders a bordered chip tinted via `currentColor`
+- `.s-greek-{STATUS}` — Greek text status chip colors (DRAFT/REVISED/FINAL)
+- `.p-{PRIORITY}` — priority label with leading square dot (`::before`)
 - `.p-dot-{PRIORITY}` — priority circle dot (8px)
 - `.s-border-{STATUS}` — board card left-border color
 - `.subject-badge.subj-{slug}` — subject chip with background color
-- `.mono-label` — 11px uppercase tracking label
-- `.display-text` — Impact font, uppercase, tight line-height
+- `.mono-label` — 10px uppercase mono tracking label
+- `.display-text` — display font, uppercase, tight line-height
+- `.data-section` — panel: raised surface + border + hard shadow (all views)
+- `.section-header` / `.panel-header` — accent-underlined display header / small mono header
+- `.action-btn` (+ `.ghost`, `.sm`) — accent outline button / muted variant / compact variant
+- `.due-chip` (+ `.chip-danger`) — mono date/days chip; danger turns it red
+- `.overdue-row` — hazard striping + red left border on task rows
 - `.board-5col` — overrides board grid to 5 columns (used in assignments board)
+- `.ticker-wrap` / `.ticker` — dashboard deadline marquee (duplicated `.ticker-group`s, CSS keyframe scroll)
+- `.ee-*` — EE tracker (percent display, progress track, milestone timeline, meeting log)
+- `.greek-*` — Greek portfolio (text cards, status stepper, progress segments)
 
 HTML pattern: each view is a `<div data-view="viewname">` inside `<main>`. The router shows/hides them with `main [data-view]` selector. Nav items use `data-view` attribute for the same view IDs.
