@@ -1,37 +1,87 @@
-# IB Dashboard 2025-26
+<div align="center">
 
-Personal mission-control dashboard for the IB Diploma Programme. Industrial-brutalist UI, vanilla ES modules (no framework, no build step), two-way synced with Notion.
+```
+ ██╗██████╗     ██╗██████╗  ██████╗
+ ██║██╔══██╗   ██╔╝╚════██╗██╔════╝
+ ██║██████╔╝  ██╔╝  █████╔╝███████╗
+ ██║██╔══██╗ ██╔╝  ██╔═══╝ ██╔═══██╗
+ ██║██████╔╝██╔╝   ███████╗╚██████╔╝
+ ╚═╝╚═════╝ ╚═╝    ╚══════╝ ╚═════╝
+```
 
-## Views
+### `DIPLOMA PROGRAMME // MISSION CONTROL`
 
-| View | What it does |
-|---|---|
-| **Dashboard** | Deadline ticker, stat cards, urgent task list, subject load, exam countdown |
-| **Assignments** | Task table/kanban with filters, sorting, drag-and-drop — synced with Notion Assignments DB |
-| **Coding** | Coding project cards (status, stack, repo links) — synced with Notion Coding Projects DB |
-| **Greek Portfolio** | Language B oral portfolio: global issue, text status stepper |
-| **Side Quests** | Projects / tickets / team boards — synced with Notion Side Quests DB |
+_a project management dashboard for the hardest two-year sprint of my life_
 
-## Running
+![frameworks](https://img.shields.io/badge/frameworks-0-E8FF47?style=flat-square&labelColor=111111)
+![build step](https://img.shields.io/badge/build_step-none._we_ship_raw-E8FF47?style=flat-square&labelColor=111111)
+![border radius](<https://img.shields.io/badge/border--radius-0px_(non--negotiable)-E8FF47?style=flat-square&labelColor=111111>)
+![deadline](https://img.shields.io/badge/motivation-fear_of_deadlines-FF4747?style=flat-square&labelColor=111111)
+![sync](https://img.shields.io/badge/source_of_truth-notion-47C3FF?style=flat-square&labelColor=111111)
+
+</div>
+
+---
+
+## 🛰️ What is this
+
+Most students have a planner. I have **mission control**: an industrial-brutalist
+ops console for the IB Diploma. Hard edges, stencil type, lime signal paint on
+near-black steel. Every assignment, coding project, and Greek oral text tracked
+like cargo on a launch manifest.
+
+Vanilla ES modules. No framework. No bundler. One Bun server whose entire job is
+serving files and smuggling Notion API calls past the browser so the key never
+leaves the building. Everything two-way syncs with Notion — edit there or here,
+last write wins.
+
+```console
+nick@mission-control:~$ status
+5 views operational. exams T-minus counting. seal not included (wrong repo).
+```
+
+## 📋 The views
+
+|     | view                | what it actually does                                                                                                  |
+| --- | ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 01  | **DASHBOARD**       | deadline ticker scrolling like a stock exchange of dread, stat cards, urgent list with hazard striping, exam countdown |
+| 02  | **ASSIGNMENTS**     | every task, table or kanban. drag, drop, filter, sort. synced with the Notion assignments DB both ways                 |
+| 03  | **CODING**          | the projects that eat the hours homework was budgeted for. status, stack chips, repo links — synced with Notion        |
+| 04  | **GREEK PORTFOLIO** | Language B oral portfolio. one global issue, a DRAFT → REVISED → FINAL stepper per text                                |
+| 05  | **SIDE QUESTS**     | everything else I swore would only take a weekend. projects, tickets, team boards                                      |
+
+## 🚀 Run it
 
 Requires [Bun](https://bun.sh).
 
-```sh
-cp .env.example .env   # add your NOTION_API_KEY
-bun server.js
+```bash
+git clone https://github.com/nitrimandylis/pm-dashboard.git
+cd pm-dashboard
+cp .env.example .env       # add your NOTION_API_KEY
+bun server.js              # → http://localhost:8080
 ```
 
-Open <http://localhost:8080>. Do **not** open `index.html` directly — ES modules need HTTP, and Notion sync needs the server proxy.
+Do **not** open `index.html` directly. ES modules demand HTTP, the Notion sync
+demands the proxy, and the dashboard demands respect.
 
-The server serves static files and proxies `/api/notion/*` → `https://api.notion.com/v1/*`, keeping the API key server-side.
+## 🔩 Under the hood
 
-## Architecture
+| file           | job                                                                   |
+| -------------- | --------------------------------------------------------------------- |
+| `index.html`   | sidebar nav + view containers. that's it.                             |
+| `js/app.js`    | hash router, one shared modal, all five renderers, sync orchestration |
+| `js/data.js`   | constants, localStorage persistence, CRUD                             |
+| `js/notion.js` | Notion client + field mapping for four databases                      |
+| `style.css`    | the design system: surface ladders, hard shadows, hazard stripes      |
+| `server.js`    | Bun static server + `/api/notion/*` proxy. ~100 lines, zero deps      |
 
-- `index.html` — sidebar nav + view containers
-- `js/app.js` — hash router, modal, view renderers, Notion sync orchestration
-- `js/data.js` — constants, localStorage persistence, CRUD
-- `js/notion.js` — Notion API client + field mapping
-- `style.css` — design-system tokens and all component styles
-- `server.js` — Bun static server + Notion proxy
+Data lives in localStorage, syncs with Notion last-write-wins. Full data model
+and design tokens documented in `CLAUDE.md`.
 
-Data lives in localStorage and syncs with Notion (last-write-wins). See `CLAUDE.md` for the full data model and design-system reference.
+---
+
+<div align="center">
+
+`IB DIPLOMA — YEAR PROGRESS BAR INCLUDED, EMOTIONAL PROGRESS NOT TRACKED`
+
+</div>
