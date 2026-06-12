@@ -5,7 +5,7 @@
 
 const DB_ASSIGNMENTS = '223cc494-686e-41c4-a564-ae020263974e';
 const DB_SIDE_QUESTS = '3cf2a8dc-1f1e-4538-9776-93ea7ada1af6';
-const DB_EE          = '483cdbbc-a8de-4a8d-98cb-9eccd75addeb';
+const DB_CODING      = 'cb1788bf-2a1d-4a7e-b3e4-6b5daea238a8';
 const DB_GREEK       = 'd7f59811-62b8-4159-9790-fb32e598607f';
 
 async function notionReq(path, method = 'GET', body = null) {
@@ -191,27 +191,57 @@ function projectStatusIn(n) {
   return 'PAUSED';
 }
 
-// ── EE Tracker ────────────────────────────────────────────────────────────
+// ── Coding Projects ───────────────────────────────────────────────────────
 
-export async function fetchAllNotionMilestones()           { return queryDatabase(DB_EE); }
-export async function createNotionMilestone(m)             { return notionReq('/pages', 'POST', { parent: { database_id: DB_EE }, properties: toNotionMilestoneProps(m) }); }
-export async function updateNotionMilestone(notionId, m)   { return notionReq(`/pages/${notionId}`, 'PATCH', { properties: toNotionMilestoneProps(m) }); }
+export async function fetchAllNotionCoding()            { return queryDatabase(DB_CODING); }
+export async function createNotionCoding(c)             { return notionReq('/pages', 'POST', { parent: { database_id: DB_CODING }, properties: toNotionCodingProps(c) }); }
+export async function updateNotionCoding(notionId, c)   { return notionReq(`/pages/${notionId}`, 'PATCH', { properties: toNotionCodingProps(c) }); }
+export async function archiveNotionCoding(notionId)     { return notionReq(`/pages/${notionId}`, 'PATCH', { archived: true }); }
 
-function toNotionMilestoneProps(m) {
-  return {
-    Component: { title: [{ text: { content: m.label || '' } }] },
-    Status:    { select: m.done ? { name: 'Complete' } : { name: 'In Progress' } },
+function toNotionCodingProps(c) {
+  const props = {
+    Project:       { title: [{ text: { content: c.name || '' } }] },
+    Status:        { select: { name: codingStatusOut(c.status) } },
+    Description:   { rich_text: [{ text: { content: c.description || '' } }] },
+    'Repo URL':    { url: c.repoUrl || null },
+    Stack:         { multi_select: (c.stack || []).map(name => ({ name })) },
   };
+  // Notion rejects null selects — only include optional selects when they have a value
+  if (c.category) props.Category = { select: { name: c.category } };
+  if (c.type)     props.Type     = { select: { name: c.type } };
+  if (c.started)  props.Started  = { date: { start: c.started } };
+  return props;
 }
 
-export function fromNotionMilestone(page) {
+export function fromNotionCoding(page) {
   const p = page.properties;
   return {
     notionId:        page.id,
-    label:           p.Component?.title?.[0]?.plain_text || '',
-    done:            p.Status?.select?.name === 'Complete',
+    name:            p.Project?.title?.[0]?.plain_text || '',
+    status:          codingStatusIn(p.Status?.select?.name),
+    category:        p.Category?.select?.name || '',
+    stack:           (p.Stack?.multi_select || []).map(s => s.name),
+    type:            p.Type?.select?.name || '',
+    description:     p.Description?.rich_text?.[0]?.plain_text || '',
+    repoUrl:         p['Repo URL']?.url || '',
+    started:         p.Started?.date?.start || '',
+    lastPushed:      p['Last Pushed']?.date?.start || '',
     notionUpdatedAt: page.last_edited_time,
   };
+}
+
+const CODING_STATUS_MAP = {
+  IDEA:        'Idea',
+  IN_PROGRESS: 'In Progress',
+  PAUSED:      'Paused',
+  SHIPPED:     'Shipped',
+  ARCHIVED:    'Archived',
+};
+
+function codingStatusOut(s) { return CODING_STATUS_MAP[s] || 'Idea'; }
+
+function codingStatusIn(n) {
+  return Object.keys(CODING_STATUS_MAP).find(k => CODING_STATUS_MAP[k] === n) || 'IDEA';
 }
 
 // ── Greek Portfolio ───────────────────────────────────────────────────────

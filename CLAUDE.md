@@ -28,11 +28,11 @@ The app uses ES modules with two JS files and one CSS file. No framework, bundle
 | `style.css` | Design system tokens, all component styles, subject badge colors |
 
 **`js/data.js`** top-to-bottom sections:
-- Constants: `SUBJECTS`, `STATUS`, `PRIORITY`, `SIDE_QUEST_STATUSES`, `GREEK_TEXT_STATUSES`
-- Seed data: `SEED_TASKS` (14), `SEED_PROJECTS` (4), `SEED_EE`, `SEED_GREEK`
+- Constants: `SUBJECTS`, `STATUS`, `PRIORITY`, `SIDE_QUEST_STATUSES`, `GREEK_TEXT_STATUSES`, `CODING_STATUSES`, `CODING_CATEGORIES`, `CODING_STACKS`, `CODING_TYPES`
+- Seed data: empty seeds — everything populated from Notion on first sync
 - Persistence: `loadData(key, seed)` / `saveData(key, value)` using `STORE_KEYS`
-- Mutable state: `export let tasks / projects / ee / greek` (live ES module bindings)
-- CRUD: `createTask`, `updateTask`, `deleteTask`, `createProject`, `updateProject`, `deleteProject`, `updateEE`, `addMeeting`, `updateGreek`, `updateGreekText`
+- Mutable state: `export let tasks / projects / coding / greek` (live ES module bindings)
+- CRUD: `createTask`, `updateTask`, `deleteTask`, `createProject`, `updateProject`, `deleteProject`, `createCoding`, `updateCoding`, `deleteCoding`, `setCoding`, `updateGreek`, `updateGreekText`
 
 **`js/app.js`** top-to-bottom sections:
 - IMPORTS: all from `./data.js`
@@ -41,9 +41,9 @@ The app uses ES modules with two JS files and one CSS file. No framework, bundle
 - HELPERS: `esc()`, `fmtStatus()`, `fmtDate()`, `daysUntil()`, `subjectSlug()`, `subjectBadge()`, `getISOWeek()`, `updateMeta()`
 - DASHBOARD: `renderDashboard()` — deadline ticker, stat row, urgent list, subject load bars, exam countdown + year progress
 - ASSIGNMENTS: `initAssignments()` (injects toolbar into container), `renderAssignments()`, table/board toggle, task CRUD modals
-- EE TRACKER: `renderEETracker()` — percent display + word count, milestone timeline checkboxes, supervisor meeting log
+- CODING: `renderCoding()` — coding project cards synced with Notion Coding Projects DB (status cycle, category/stack chips, repo link, edit/delete)
 - GREEK PORTFOLIO: `renderGreekPortfolio()` — global issue, progress segments, text cards with status stepper / word count / notes
-- DEV PM: `renderPM()` — projects / tickets / team tabs with CRUD
+- SIDE QUESTS (view id `projects`): `renderPM()` — projects / tickets / team tabs with CRUD
 - BOOT: `initModal()`, `initAssignments()`, `registerView()` calls, nav listeners, meta-grid init, `initRouter('dashboard')`
 
 ## Data Model
@@ -52,7 +52,7 @@ All data stored in localStorage as JSON:
 
 - `ib_tasks` → `{ id, title, subject, deadline, priority, status, notes, createdAt, updatedAt }`
 - `ib_projects` → `{ id, name, status, lastAction, nextStep, priority }`
-- `ib_ee` → `{ wordCount, milestones: [{ id, label, done }], meetings: [{ id, date, notes }] }`
+- `ib_coding` → `{ id, notionId, name, status, category, stack: [], type, description, repoUrl, started, lastPushed, notionUpdatedAt }`
 - `ib_greek` → `{ globalIssue, texts: [{ id, title, wordCount, status, notes }] }`
 
 Enum values:
@@ -60,6 +60,7 @@ Enum values:
 - `priority`: CRITICAL | HIGH | NORMAL | LOW
 - `status` (tasks): TODO | IN_PROGRESS | REVIEW | DONE | BLOCKED
 - `status` (projects): ACTIVE | PAUSED | DONE
+- `status` (coding): IDEA | IN_PROGRESS | PAUSED | SHIPPED | ARCHIVED
 - `status` (greek texts): DRAFT | REVISED | FINAL
 
 ## Design System
@@ -102,7 +103,7 @@ CSS class conventions:
 - `.overdue-row` — hazard striping + red left border on task rows
 - `.board-5col` — overrides board grid to 5 columns (used in assignments board)
 - `.ticker-wrap` / `.ticker` — dashboard deadline marquee (duplicated `.ticker-group`s, CSS keyframe scroll)
-- `.ee-*` — EE tracker (percent display, progress track, milestone timeline, meeting log)
+- `.ee-*` — legacy EE tracker styles (view removed; classes unused)
 - `.greek-*` — Greek portfolio (text cards, status stepper, progress segments)
 
 HTML pattern: each view is a `<div data-view="viewname">` inside `<main>`. The router shows/hides them with `main [data-view]` selector. Nav items use `data-view` attribute for the same view IDs.

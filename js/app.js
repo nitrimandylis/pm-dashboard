@@ -3,9 +3,10 @@
 // ============================================================
 import {
   SUBJECTS, STATUS, PRIORITY, TASK_TYPES, SIDE_QUEST_STATUSES, GREEK_TEXT_STATUSES,
+  CODING_STATUSES, CODING_CATEGORIES, CODING_STACKS, CODING_TYPES,
   tasks, createTask, updateTask, deleteTask, setTasks, generateId,
   projects, createProject, updateProject, deleteProject,
-  ee, updateEE, addMeeting,
+  coding, createCoding, updateCoding, deleteCoding, setCoding,
   greek, updateGreek, updateGreekText,
   // PM
   getPMTickets, createPMTicket, updatePMTicket, deletePMTicket,
@@ -22,7 +23,7 @@ import {
   updatePageBody,
   fromNotionPage,
   fetchAllNotionProjects, createNotionProject, updateNotionProject, archiveNotionProject, fromNotionProject,
-  fetchAllNotionMilestones, createNotionMilestone, updateNotionMilestone, fromNotionMilestone,
+  fetchAllNotionCoding, createNotionCoding, updateNotionCoding, archiveNotionCoding, fromNotionCoding,
   fetchAllNotionTexts, createNotionText, updateNotionText, archiveNotionText, fromNotionText,
 } from './notion.js';
 
@@ -173,9 +174,9 @@ function getISOWeek(d = new Date()) {
 const VIEW_TITLES = {
   'dashboard':       'Dashboard',
   'assignments':     'Assignments',
-  'ee-tracker':      'EE Tracker',
+  'coding':          'Coding',
   'greek-portfolio': 'Greek Portfolio',
-  'projects':        'Projects',
+  'projects':        'Side Quests',
 };
 
 function updateMeta(viewId) {
@@ -669,110 +670,142 @@ function renderAndRefreshDash() {
 }
 
 // ============================================================
-// EE TRACKER
+// CODING
 // ============================================================
-function renderEETracker() {
-  const container = document.querySelector('main [data-view="ee-tracker"]');
+let codingFilterStatus = 'ACTIVE';
+
+const CODING_STATUS_CYCLE = ['IDEA', 'IN_PROGRESS', 'PAUSED', 'SHIPPED', 'ARCHIVED'];
+
+function renderCoding() {
+  const container = document.querySelector('main [data-view="coding"]');
   if (!container) return;
 
-  const wordCount = ee.wordCount || 0;
-  const pct = Math.min(100, Math.round((wordCount / 4000) * 100));
-  const doneMilestones = ee.milestones.filter(m => m.done).length;
+  let list = [...coding];
+  if (codingFilterStatus === 'ACTIVE') list = list.filter(c => c.status !== 'SHIPPED' && c.status !== 'ARCHIVED');
+  else if (codingFilterStatus)         list = list.filter(c => c.status === codingFilterStatus);
+  list.sort((a, b) => (b.notionUpdatedAt || '').localeCompare(a.notionUpdatedAt || ''));
+
+  const statusColor = {
+    IDEA: '#555', IN_PROGRESS: 'var(--accent)', PAUSED: '#FFB347',
+    SHIPPED: 'var(--status-done)', ARCHIVED: '#444',
+  };
 
   container.innerHTML = `
     <div class="view-toolbar">
-      <div class="view-context mono-label">EXTENDED ESSAY — 4,000 WORD TARGET</div>
-      <button id="btn-sync-notion-ee" class="action-btn ghost">⟳ SYNC NOTION</button>
-      <span id="sync-status-ee" class="mono-label sync-label"></span>
+      <div class="view-context mono-label">CODING PROJECTS — DEV LOG</div>
+      <div class="filter-bar">
+        <select id="coding-filter-status" class="filter-select">
+          <option value="ACTIVE">ACTIVE (not shipped)</option>
+          <option value="">ALL STATUS</option>
+          ${CODING_STATUSES.map(s => `<option value="${s}">${fmtStatus(s)}</option>`).join('')}
+        </select>
+      </div>
+      <button id="btn-new-coding" class="action-btn">+ NEW PROJECT</button>
+      <button id="btn-sync-notion-coding" class="action-btn ghost">⟳ SYNC NOTION</button>
+      <span id="sync-status-coding" class="mono-label sync-label"></span>
     </div>
 
-    <div class="ee-layout">
-      <div class="ee-left">
-        <!-- Draft progress -->
-        <div class="data-section">
-          <div class="panel-header">
-            <span class="panel-label mono-label">DRAFT PROGRESS</span>
-            <span class="tag">${wordCount} / 4000</span>
+    <div class="project-grid">
+      ${list.length ? list.map(c => `
+        <div class="project-card">
+          <div class="project-phase-bar">
+            <span class="mono-label clickable-coding-status" data-id="${c.id}"
+              title="Click to cycle status" style="cursor:pointer;color:${statusColor[c.status] || '#555'}">● ${fmtStatus(c.status)}</span>
+            ${c.repoUrl ? `<a href="${esc(c.repoUrl)}" target="_blank" rel="noopener" class="edit-btn" style="text-decoration:none;margin-left:auto" title="Open repo">↗</a>` : ''}
           </div>
-          <div class="ee-percent display-text">${pct}<span>%</span></div>
-          <div class="progress-track">
-            <div id="ee-progress-bar" class="progress-fill" style="width:${pct}%"></div>
+          <div class="project-name display-text">${esc(c.name)}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">
+            ${c.category ? `<span class="due-chip">${esc(c.category)}</span>` : ''}
+            ${(c.stack || []).map(s => `<span class="due-chip">${esc(s)}</span>`).join('')}
           </div>
-          <div class="ee-wc-row">
-            <input type="number" id="ee-wordcount" class="ee-wc-input" value="${wordCount}" min="0" max="4000">
-            <span class="mono-label">/ 4000 WORDS</span>
+          ${c.description ? `<div class="project-desc">${esc(c.description)}</div>` : ''}
+          <div class="project-meta">
+            <div class="project-stats">
+              ${c.started ? `<span class="mono-label">SINCE ${fmtDate(c.started)}</span>` : '<span class="mono-label" style="color:#444">—</span>'}
+            </div>
+            <span class="mono-label" style="color:#444">${c.lastPushed ? 'PUSHED ' + fmtDate(c.lastPushed) : 'NO PUSHES'}</span>
           </div>
-        </div>
-
-        <!-- Meeting log -->
-        <div class="data-section">
-          <div class="panel-header">
-            <span class="panel-label mono-label">SUPERVISOR MEETING LOG</span>
-            <button id="btn-add-meeting" class="action-btn sm">+ ADD</button>
+          <div class="project-card-actions">
+            <span class="mono-label" style="color:#444">${esc(c.type || '')}</span>
+            <div class="project-action-btns">
+              <button class="edit-btn coding-edit" data-id="${c.id}">&#x270E; EDIT</button>
+              <button class="edit-btn coding-del" data-id="${c.id}">&#x2715; DELETE</button>
+            </div>
           </div>
-          <div class="ee-meeting-list">
-            ${ee.meetings.length ? ee.meetings.map(m => `
-              <div class="ee-meeting">
-                <span class="due-chip">${fmtDate(m.date)}</span>
-                <span class="ee-meeting-notes">${esc(m.notes)}</span>
-              </div>`).join('')
-            : '<div class="empty-state">No meetings logged yet.</div>'}
-          </div>
-        </div>
-      </div>
-
-      <!-- Milestones -->
-      <div class="data-section">
-        <div class="section-header display-text">
-          MILESTONES
-          <span class="tag">${doneMilestones}/${ee.milestones.length} DONE</span>
-        </div>
-        <div class="ee-timeline">
-          ${ee.milestones.length ? ee.milestones.map((m, i) => `
-            <label class="ee-milestone ${m.done ? 'is-done' : ''}">
-              <input type="checkbox" class="ee-milestone-check" data-id="${m.id}" ${m.done ? 'checked' : ''}>
-              <span class="ee-milestone-num display-text">${String(i + 1).padStart(2, '0')}</span>
-              <span class="ee-milestone-label">${esc(m.label)}</span>
-            </label>`).join('')
-          : '<div class="empty-state">No milestones yet — sync with Notion.</div>'}
-        </div>
-      </div>
+        </div>`).join('')
+      : '<div class="empty-state" style="grid-column:1/-1">No coding projects — sync with Notion or create one.</div>'}
     </div>`;
 
-  // Word count input handler
-  document.getElementById('ee-wordcount').addEventListener('change', e => {
-    const val = parseInt(e.target.value, 10) || 0;
-    updateEE({ wordCount: val });
-    renderEETracker();
-  });
+  const filterEl = document.getElementById('coding-filter-status');
+  filterEl.value = codingFilterStatus;
+  filterEl.addEventListener('change', e => { codingFilterStatus = e.target.value; renderCoding(); });
 
-  // Milestone checkboxes
-  container.querySelectorAll('.ee-milestone-check').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const updated = ee.milestones.map(m =>
-        m.id === cb.dataset.id ? { ...m, done: cb.checked } : m
-      );
-      updateEE({ milestones: updated });
-      schedulePush('ee', cb.dataset.id);
-      renderEETracker();
+  document.getElementById('btn-new-coding').addEventListener('click', () => openCodingModal());
+  document.getElementById('btn-sync-notion-coding').addEventListener('click', syncCodingWithNotion);
+
+  container.querySelectorAll('.clickable-coding-status').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const c = coding.find(c => c.id === el.dataset.id);
+      if (!c) return;
+      const next = CODING_STATUS_CYCLE[(CODING_STATUS_CYCLE.indexOf(c.status) + 1) % CODING_STATUS_CYCLE.length];
+      updateCoding(c.id, { status: next });
+      schedulePush('coding', c.id);
+      renderCoding();
     });
   });
 
-  document.getElementById('btn-sync-notion-ee').addEventListener('click', syncEEWithNotion);
+  container.querySelectorAll('.coding-edit').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); openCodingModal(btn.dataset.id); });
+  });
 
-  // Add meeting
-  document.getElementById('btn-add-meeting').addEventListener('click', () => {
-    openModal({
-      title: 'ADD MEETING',
-      fields: [
-        { name: 'date',  label: 'DATE',  type: 'date',     required: true },
-        { name: 'notes', label: 'NOTES', type: 'textarea', required: false },
-      ],
-      onSubmit(data) {
-        addMeeting(data);
-        renderEETracker();
-      },
+  container.querySelectorAll('.coding-del').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (btn.dataset.confirm) {
+        const c = coding.find(c => c.id === btn.dataset.id);
+        if (c?.notionId) archiveNotionCoding(c.notionId).catch(err => console.error('Notion archive failed:', err));
+        deleteCoding(btn.dataset.id);
+        renderCoding();
+      } else {
+        btn.dataset.confirm = '1';
+        btn.textContent = 'SURE?';
+        btn.style.color = 'var(--status-blocked)';
+        setTimeout(() => { if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715; DELETE'; btn.style.color = ''; } }, 3000);
+      }
     });
+  });
+}
+
+function openCodingModal(id) {
+  const c = id ? coding.find(c => c.id === id) : null;
+  openModal({
+    title: c ? 'EDIT PROJECT' : 'NEW PROJECT',
+    submitLabel: c ? 'SAVE' : 'CREATE',
+    fields: [
+      { name: 'name',        label: 'PROJECT NAME', defaultValue: c?.name || '' },
+      { name: 'status',      label: 'STATUS',   type: 'select', options: CODING_STATUSES.map(s => ({ value: s, label: fmtStatus(s) })), defaultValue: c?.status || 'IDEA' },
+      { name: 'category',    label: 'CATEGORY', type: 'select', required: false, options: [{ value: '', label: '— None —' }, ...CODING_CATEGORIES], defaultValue: c?.category || '' },
+      { name: 'stack',       label: 'STACK (comma-separated)', required: false, defaultValue: (c?.stack || []).join(', ') },
+      { name: 'type',        label: 'TYPE',     type: 'select', required: false, options: [{ value: '', label: '— None —' }, ...CODING_TYPES], defaultValue: c?.type || '' },
+      { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false, defaultValue: c?.description || '' },
+      { name: 'repoUrl',     label: 'REPO URL', type: 'url',  required: false, defaultValue: c?.repoUrl || '' },
+      { name: 'started',     label: 'STARTED',  type: 'date', required: false, defaultValue: c?.started || '' },
+    ],
+    onSubmit(data) {
+      // Only keep stack entries Notion knows about — free-typed extras map to "Other"
+      const stack = [...new Set(data.stack.split(',').map(s => s.trim()).filter(Boolean)
+        .map(s => CODING_STACKS.find(k => k.toLowerCase() === s.toLowerCase()) || 'Other'))];
+      const patch = { ...data, stack };
+      if (c) {
+        updateCoding(id, patch);
+        schedulePush('coding', id);
+      } else {
+        const created = createCoding(patch);
+        schedulePush('coding', created.id);
+      }
+      renderCoding();
+    },
   });
 }
 
@@ -878,12 +911,12 @@ function renderGreekPortfolio() {
 const syncState = {
   assignments: { pending: new Set(), timer: null },
   projects:    { pending: new Set(), timer: null },
-  ee:          { pending: new Set(), timer: null },
+  coding:      { pending: new Set(), timer: null },
   greek:       { pending: new Set(), timer: null },
 };
 
-const SYNC_BTN_IDS = { assignments: 'btn-sync-notion', projects: 'btn-sync-notion-projects', ee: 'btn-sync-notion-ee', greek: 'btn-sync-notion-greek' };
-const SYNC_LBL_IDS = { assignments: 'sync-status',     projects: 'sync-status-projects',     ee: 'sync-status-ee',   greek: 'sync-status-greek' };
+const SYNC_BTN_IDS = { assignments: 'btn-sync-notion', projects: 'btn-sync-notion-projects', coding: 'btn-sync-notion-coding', greek: 'btn-sync-notion-greek' };
+const SYNC_LBL_IDS = { assignments: 'sync-status',     projects: 'sync-status-projects',     coding: 'sync-status-coding',     greek: 'sync-status-greek' };
 function getSyncBtn(v) { return document.getElementById(SYNC_BTN_IDS[v]); }
 function getSyncLbl(v) { return document.getElementById(SYNC_LBL_IDS[v]); }
 
@@ -897,7 +930,7 @@ async function flushPushForView(viewKey) {
   const btn = getSyncBtn(viewKey), lbl = getSyncLbl(viewKey);
   if (viewKey === 'assignments') await flushPushAssignments(btn, lbl);
   else if (viewKey === 'projects') await flushPushProjects(btn, lbl);
-  else if (viewKey === 'ee')       await flushPushEE(btn, lbl);
+  else if (viewKey === 'coding')   await flushPushCoding(btn, lbl);
   else if (viewKey === 'greek')    await flushPushGreek(btn, lbl);
 }
 
@@ -1101,83 +1134,76 @@ async function syncProjectsWithNotion() {
   }
 }
 
-// ── EE flush + sync ────────────────────────────────────────────────────────
+// ── Coding flush + sync ────────────────────────────────────────────────────
 
-async function flushPushEE(btnEl, lblEl) {
-  const state = syncState.ee;
+async function flushPushCoding(btnEl, lblEl) {
+  const state = syncState.coding;
   if (!state.pending.size) return;
   const ids = [...state.pending];
   state.pending.clear();
   setSyncStatus('syncing', btnEl, lblEl);
   try {
     for (const id of ids) {
-      const m = ee.milestones.find(m => m.id === id);
-      if (!m) continue;
-      if (m.notionId) {
-        await updateNotionMilestone(m.notionId, m);
+      const c = coding.find(c => c.id === id);
+      if (!c) continue;
+      if (c.notionId) {
+        await updateNotionCoding(c.notionId, c);
       } else {
-        const page = await createNotionMilestone(m);
-        if (page?.id) {
-          const updatedMilestones = ee.milestones.map(ms =>
-            ms.id === id ? { ...ms, notionId: page.id } : ms
-          );
-          updateEE({ milestones: updatedMilestones });
-        }
+        const page = await createNotionCoding(c);
+        if (page?.id) updateCoding(c.id, { notionId: page.id });
       }
     }
     setSyncStatus('success', btnEl, lblEl);
     setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
   } catch (err) {
-    console.error('EE auto-sync failed:', err);
+    console.error('Coding auto-sync failed:', err);
     setSyncStatus('error', btnEl, lblEl, err.message);
   }
 }
 
-async function syncEEWithNotion() {
-  const btnEl = getSyncBtn('ee'), lblEl = getSyncLbl('ee');
+async function syncCodingWithNotion() {
+  const btnEl = getSyncBtn('coding'), lblEl = getSyncLbl('coding');
   setSyncStatus('syncing', btnEl, lblEl);
   try {
-    const notionPages = await fetchAllNotionMilestones();
+    const notionPages = await fetchAllNotionCoding();
     const localByNotionId = Object.fromEntries(
-      ee.milestones.filter(m => m.notionId).map(m => [m.notionId, m])
+      coding.filter(c => c.notionId).map(c => [c.notionId, c])
     );
-    let updatedMilestones = [...ee.milestones];
+    let updated = [...coding];
 
     for (const page of notionPages) {
-      const remote = fromNotionMilestone(page);
+      const remote = fromNotionCoding(page);
       const local  = localByNotionId[page.id];
       if (local) {
         const remoteTime = new Date(remote.notionUpdatedAt);
         const localTime  = new Date(local.notionUpdatedAt || 0);
         if (remoteTime >= localTime) {
-          updatedMilestones = updatedMilestones.map(m =>
-            m.id === local.id ? { ...m, label: remote.label, done: remote.done, notionId: remote.notionId, notionUpdatedAt: remote.notionUpdatedAt } : m
+          updated = updated.map(c =>
+            c.id === local.id ? { ...c, ...remote, id: c.id } : c
           );
         } else {
-          await updateNotionMilestone(page.id, local);
+          await updateNotionCoding(page.id, local);
         }
       } else {
-        updatedMilestones = [...updatedMilestones, {
-          id:    generateId('ee'),
+        updated = [...updated, {
+          id: generateId('code'),
           ...remote,
         }];
       }
     }
 
-    const needsPush = updatedMilestones.filter(m => !m.notionId);
-    for (const milestone of needsPush) {
-      const page = await createNotionMilestone(milestone);
-      updatedMilestones = updatedMilestones.map(m =>
-        m.id === milestone.id ? { ...m, notionId: page.id } : m
-      );
+    const needsPush = updated.filter(c => !c.notionId);
+    for (const proj of needsPush) {
+      const page = await createNotionCoding(proj);
+      updated = updated.map(c => c.id === proj.id ? { ...c, notionId: page.id } : c);
     }
 
-    updateEE({ milestones: updatedMilestones });
+    setCoding(updated);
     setSyncStatus('success', btnEl, lblEl);
     setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
-    renderEETracker();
+    renderCoding();
   } catch (err) {
-    console.error('EE sync failed:', err);
+    console.error('Coding sync failed:', err);
     setSyncStatus('error', btnEl, lblEl, err.message);
   }
 }
@@ -1746,13 +1772,13 @@ function openNewPMMemberModal() {
 initModal();
 initAssignments();
 
-if (projects.length === 0)      syncProjectsWithNotion();
-if (ee.milestones.length === 0) syncEEWithNotion();
-if (greek.texts.length === 0)   syncGreekWithNotion();
+if (projects.length === 0)    syncProjectsWithNotion();
+if (coding.length === 0)      syncCodingWithNotion();
+if (greek.texts.length === 0) syncGreekWithNotion();
 
 registerView('dashboard',       renderDashboard);
 registerView('assignments',     renderAssignments);
-registerView('ee-tracker',      renderEETracker);
+registerView('coding',          renderCoding);
 registerView('greek-portfolio', renderGreekPortfolio);
 registerView('projects',        renderPM);
 

@@ -25,6 +25,12 @@ export const TASK_TYPES = ['Homework', 'IA', 'Assessment', 'Exam Prep', 'Project
 export const SIDE_QUEST_STATUSES = ['ACTIVE', 'PAUSED', 'DONE'];
 export const GREEK_TEXT_STATUSES = ['DRAFT', 'REVISED', 'FINAL'];
 
+// Match Notion Coding Projects database
+export const CODING_STATUSES   = ['IDEA', 'IN_PROGRESS', 'PAUSED', 'SHIPPED', 'ARCHIVED'];
+export const CODING_CATEGORIES = ['IB IA', 'Side Project', 'Competition', 'Learning', 'Tool/Automation', 'Web App'];
+export const CODING_STACKS     = ['Python', 'JavaScript', 'HTML/CSS', 'TypeScript', 'Swift', 'React', 'Node.js', 'Flask', 'Other'];
+export const CODING_TYPES      = ['Private', 'Public'];
+
 // ============================================================
 // SEED DATA
 // ============================================================
@@ -32,11 +38,7 @@ const SEED_TASKS = []; // Populated from Notion on first sync
 
 const SEED_PROJECTS = [];
 
-const SEED_EE = {
-  wordCount: 0,
-  milestones: [],
-  meetings: [],
-};
+const SEED_CODING = []; // Populated from Notion on first sync
 
 const SEED_GREEK = {
   globalIssue: '',
@@ -49,17 +51,18 @@ const SEED_GREEK = {
 const STORE_KEYS = {
   tasks:    'ib_tasks',
   projects: 'ib_projects',
-  ee:       'ib_ee',
+  coding:   'ib_coding',
   greek:    'ib_greek',
 };
 
 // Bump this string whenever the tasks schema changes to wipe stale localStorage.
-const DATA_VERSION     = '5'; // v5: removed all seed data
+const DATA_VERSION     = '6'; // v6: EE tracker replaced by coding projects
 const DATA_VERSION_KEY = 'ib_data_version';
 
 function migrateIfNeeded() {
   if (localStorage.getItem(DATA_VERSION_KEY) !== DATA_VERSION) {
     Object.values(STORE_KEYS).forEach(k => localStorage.removeItem(k));
+    localStorage.removeItem('ib_ee'); // legacy EE tracker store
     localStorage.setItem(DATA_VERSION_KEY, DATA_VERSION);
   }
 }
@@ -84,7 +87,7 @@ export function saveData(key, value) {
 // ============================================================
 export let tasks    = loadData('tasks',    SEED_TASKS);
 export let projects = loadData('projects', SEED_PROJECTS);
-export let ee       = loadData('ee',       SEED_EE);
+export let coding   = loadData('coding',   SEED_CODING);
 export let greek    = loadData('greek',    SEED_GREEK);
 
 // ============================================================
@@ -136,18 +139,28 @@ export function deleteProject(id) {
 }
 
 // ============================================================
-// EE CRUD
+// CODING CRUD
 // ============================================================
-export function updateEE(patch) {
-  ee = { ...ee, ...patch };
-  saveData('ee', ee);
+export function createCoding(data) {
+  const c = { id: uid('code'), stack: [], ...data };
+  coding = [...coding, c];
+  saveData('coding', coding);
+  return c;
 }
 
-export function addMeeting(data) {
-  const m = { id: uid('meet'), ...data };
-  ee = { ...ee, meetings: [...ee.meetings, m] };
-  saveData('ee', ee);
-  return m;
+export function updateCoding(id, patch) {
+  coding = coding.map(c => c.id === id ? { ...c, ...patch } : c);
+  saveData('coding', coding);
+}
+
+export function deleteCoding(id) {
+  coding = coding.filter(c => c.id !== id);
+  saveData('coding', coding);
+}
+
+export function setCoding(list) {
+  coding = list;
+  saveData('coding', coding);
 }
 
 // ============================================================
