@@ -5,7 +5,8 @@
 //   or:  cp .env.example .env && bun server.js  (bun auto-loads .env)
 
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
-const PORT = Number(process.env.PORT) || 8080;
+// 8080 is glance's port, so this one stays out of its way by default.
+const PORT = Number(process.env.PORT) || 8090;
 
 if (!NOTION_API_KEY) {
   console.warn('⚠  NOTION_API_KEY not set — Notion sync will not work.');

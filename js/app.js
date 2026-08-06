@@ -2,28 +2,26 @@
 // IMPORTS
 // ============================================================
 import {
-  SUBJECTS, STATUS, PRIORITY, TASK_TYPES, SIDE_QUEST_STATUSES, GREEK_TEXT_STATUSES,
+  YEAR_START, EXAM_DATE, YEAR_LABEL,
+  SUBJECTS, STATUS, PRIORITY, TASK_TYPES,
+  SIDE_QUEST_STATUSES, SIDE_QUEST_CATEGORIES, SCHOOL_YEARS,
   CODING_STATUSES, CODING_CATEGORIES, CODING_STACKS, CODING_TYPES,
-  tasks, createTask, updateTask, deleteTask, setTasks, generateId,
-  projects, createProject, updateProject, deleteProject,
+  GREEK_STATUSES, GREEK_TEXTS, GREEK_CONCEPTS, GREEK_AREAS,
+  GREEK_ASSESSMENT, GREEK_FIELDS, GREEK_READING, GREEK_SKILLS,
+  generateId,
+  tasks, createTask, updateTask, deleteTask, setTasks,
+  quests, createQuest, updateQuest, deleteQuest, setQuests,
   coding, createCoding, updateCoding, deleteCoding, setCoding,
-  greek, updateGreek, updateGreekText,
-  // PM
-  getPMTickets, createPMTicket, updatePMTicket, deletePMTicket,
-  getPMTeam, createPMMember, updatePMMember, deletePMMember,
-  getPMActiveProject, setPMActiveProject,
+  codingTasks, createCodingTask, updateCodingTask, deleteCodingTask, setCodingTasks,
+  greek, createGreekEntry, updateGreekEntry, deleteGreekEntry, setGreek,
 } from './data.js';
 
 import {
-  fetchAllNotionTasks,
-  createNotionTask,
-  updateNotionTask,
-  archiveNotionTask,
-  fetchPageBody,
-  updatePageBody,
-  fromNotionPage,
+  fetchPageBody, updatePageBody,
+  fetchAllNotionTasks, createNotionTask, updateNotionTask, archiveNotionTask, fromNotionPage,
   fetchAllNotionProjects, createNotionProject, updateNotionProject, archiveNotionProject, fromNotionProject,
   fetchAllNotionCoding, createNotionCoding, updateNotionCoding, archiveNotionCoding, fromNotionCoding,
+  fetchAllNotionCodingTasks, createNotionCodingTask, updateNotionCodingTask, archiveNotionCodingTask, fromNotionCodingTask,
   fetchAllNotionTexts, createNotionText, updateNotionText, archiveNotionText, fromNotionText,
 } from './notion.js';
 
@@ -31,7 +29,6 @@ import {
 // ROUTER
 // ============================================================
 const views = {};
-let currentView = null;
 
 function registerView(id, render) {
   views[id] = render;
@@ -47,23 +44,25 @@ function navigateTo(viewId) {
 
 function activateView(viewId) {
   if (!views[viewId]) return;
+  closeModal(); // an open modal belongs to the view being left
   document.querySelectorAll('main [data-view]').forEach(el => el.style.display = 'none');
   const container = document.querySelector(`main [data-view="${viewId}"]`);
   if (container) container.style.display = '';
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('nav-active', el.dataset.view === viewId);
   });
-  currentView = viewId;
   updateMeta(viewId);
   views[viewId]();
 }
 
 function initRouter(defaultView) {
-  window.addEventListener('hashchange', () => {
-    const id = window.location.hash.slice(1) || defaultView;
-    activateView(id);
-  });
-  activateView(window.location.hash.slice(1) || defaultView);
+  // Fall back to the default so an old bookmark (#projects) is not a blank page
+  const resolve = () => {
+    const id = window.location.hash.slice(1);
+    return views[id] ? id : defaultView;
+  };
+  window.addEventListener('hashchange', () => activateView(resolve()));
+  activateView(resolve());
 }
 
 // ============================================================
@@ -91,17 +90,29 @@ function openModal({ title, fields, onSubmit, submitLabel = 'CREATE' }) {
   document.getElementById('modal-close-btn').addEventListener('click', closeModal);
   document.getElementById('modal-form').addEventListener('submit', e => {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target));
-    onSubmit(data);
+    onSubmit(collectFields(new FormData(e.target), fields));
     closeModal();
   });
   modalOverlay.classList.add('active');
   modalBox.querySelector('input, select, textarea')?.focus();
 }
 
+// FormData collapses repeated names, so multi and checkbox fields are read
+// explicitly rather than through Object.fromEntries.
+function collectFields(fd, fields) {
+  const data = {};
+  for (const f of fields) {
+    if (f.type === 'multi')         data[f.name] = fd.getAll(f.name);
+    else if (f.type === 'checkbox') data[f.name] = fd.get(f.name) === 'on';
+    else                            data[f.name] = fd.get(f.name) ?? '';
+  }
+  return data;
+}
+
 function renderField({ name, label, type = 'text', options, required = true, defaultValue = '' }) {
   const req = required ? 'required' : '';
   const defVal = esc(defaultValue);
+
   if (type === 'select') {
     return `<div class="modal-field">
       <label class="mono-label modal-label">${label}</label>
@@ -114,17 +125,47 @@ function renderField({ name, label, type = 'text', options, required = true, def
         }).join('')}
       </select></div>`;
   }
+
+  if (type === 'multi') {
+    const chosen = new Set(defaultValue || []);
+    return `<div class="modal-field">
+      <label class="mono-label modal-label">${label}</label>
+      <div class="chip-picker">
+        ${(options || []).map(o => `
+          <label class="chip-option ${chosen.has(o) ? 'chip-on' : ''}">
+            <input type="checkbox" name="${name}" value="${esc(o)}" ${chosen.has(o) ? 'checked' : ''}>
+            <span>${esc(o)}</span>
+          </label>`).join('')}
+      </div></div>`;
+  }
+
+  if (type === 'checkbox') {
+    return `<div class="modal-field modal-field-inline">
+      <label class="chip-option ${defaultValue ? 'chip-on' : ''}">
+        <input type="checkbox" name="${name}" ${defaultValue ? 'checked' : ''}>
+        <span>${label}</span>
+      </label></div>`;
+  }
+
   if (type === 'textarea') {
     return `<div class="modal-field">
       <label class="mono-label modal-label">${label}</label>
       <textarea name="${name}" ${req} class="modal-input modal-textarea" rows="3">${defVal}</textarea></div>`;
   }
+
   return `<div class="modal-field">
     <label class="mono-label modal-label">${label}</label>
     <input type="${type}" name="${name}" ${req} class="modal-input" value="${defVal}"></div>`;
 }
 
 function closeModal() { modalOverlay?.classList.remove('active'); }
+
+// Chip pickers toggle their own styling — the checkbox itself stays the state.
+document.addEventListener('change', e => {
+  if (e.target.matches('.chip-option input[type="checkbox"]')) {
+    e.target.closest('.chip-option').classList.toggle('chip-on', e.target.checked);
+  }
+});
 
 // ============================================================
 // HELPERS
@@ -133,7 +174,7 @@ function esc(str) {
   return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function fmtStatus(s) { return s.replace('_', '\u00A0'); }
+function fmtStatus(s) { return s.replace(/_/g, ' '); }
 
 function fmtDate(iso) {
   if (!iso) return '—';
@@ -151,17 +192,21 @@ function subjectSlug(s) {
 }
 
 function subjectBadge(subject) {
+  if (!subject) return '';
   return `<span class="subject-badge subj-${subjectSlug(subject)} mono-label">${esc(subject)}</span>`;
 }
 
-function timeAgo(iso) {
-  const ms = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+function chips(list) {
+  return (list || []).map(c => `<span class="due-chip">${esc(c)}</span>`).join('');
+}
+
+function dueChip(deadline, status) {
+  const days = daysUntil(deadline);
+  if (days === null) return '';
+  const overdue = days < 0 && status !== 'DONE';
+  return overdue
+    ? `<span class="due-chip chip-danger">${Math.abs(days)}d OVERDUE</span>`
+    : `<span class="due-chip">${days}d LEFT</span>`;
 }
 
 function getISOWeek(d = new Date()) {
@@ -171,23 +216,34 @@ function getISOWeek(d = new Date()) {
   return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
 }
 
+// Confirm-then-act on a delete button, so a stray click cannot destroy a row.
+function armDelete(btn, label, onConfirm) {
+  if (btn.dataset.confirm) { onConfirm(); return; }
+  btn.dataset.confirm = '1';
+  btn.textContent = 'SURE?';
+  btn.style.color = 'var(--status-blocked)';
+  setTimeout(() => {
+    if (btn.dataset.confirm) {
+      btn.dataset.confirm = '';
+      btn.innerHTML = label;
+      btn.style.color = '';
+    }
+  }, 3000);
+}
+
 const VIEW_TITLES = {
   'dashboard':       'Dashboard',
   'assignments':     'Assignments',
   'coding':          'Coding',
   'greek-portfolio': 'Greek Portfolio',
-  'projects':        'Side Quests',
+  'side-quests':     'Side Quests',
 };
 
 function updateMeta(viewId) {
   const crumb = document.getElementById('header-breadcrumb');
-  if (crumb && viewId) {
-    crumb.textContent = 'HOME / ' + viewId.toUpperCase().replace(/-/g, ' ');
-  }
+  if (crumb && viewId) crumb.textContent = 'HOME / ' + viewId.toUpperCase().replace(/-/g, ' ');
   const title = document.getElementById('header-title');
-  if (title && viewId) {
-    title.textContent = VIEW_TITLES[viewId] || viewId.replace(/-/g, ' ');
-  }
+  if (title && viewId) title.textContent = VIEW_TITLES[viewId] || viewId.replace(/-/g, ' ');
 }
 
 // ============================================================
@@ -209,9 +265,9 @@ function renderDashboard() {
     const d = new Date(t.deadline);
     return d >= today && d <= weekEnd;
   });
-  const done = tasks.filter(t => t.status === 'DONE');
+  const openDev = codingTasks.filter(t => t.status !== 'DONE');
 
-  // Urgent: overdue or CRITICAL/HIGH due within 7 days
+  // Urgent: anything overdue, plus HIGH priority landing inside the week
   const urgent = notDone.filter(t => {
     if (t.deadline && new Date(t.deadline) < today) return true;
     if (t.priority === 'HIGH' && t.deadline) {
@@ -228,34 +284,36 @@ function renderDashboard() {
   const maxLoad = Math.max(1, ...Object.values(subjectLoad));
 
   // Exam countdown + academic year progress
-  const examDate = new Date('2026-05-05');
+  const examDate = new Date(EXAM_DATE);
   const daysLeft = Math.ceil((examDate - new Date()) / 86400000);
   const examsPast = daysLeft < 0;
-  const yearStart = new Date('2025-09-01');
+  const yearStart = new Date(YEAR_START);
   const yearPct = Math.min(100, Math.max(0,
     Math.round(((Date.now() - yearStart) / (examDate - yearStart)) * 100)
   ));
 
-  // Deadline ticker: everything due within 14 days, soonest first
-  const upcoming = notDone
-    .filter(t => {
-      const d = daysUntil(t.deadline);
-      return d !== null && d >= 0 && d <= 14;
-    })
-    .sort((a, b) => a.deadline.localeCompare(b.deadline));
+  // Deadline ticker: assignments and dev tasks due within 14 days, soonest first
+  const upcoming = [
+    ...notDone.map(t => ({ label: t.subject, title: t.title, deadline: t.deadline })),
+    ...openDev.map(t => ({ label: 'DEV', title: t.title, deadline: t.deadline })),
+  ].filter(t => {
+    const d = daysUntil(t.deadline);
+    return d !== null && d >= 0 && d <= 14;
+  }).sort((a, b) => a.deadline.localeCompare(b.deadline));
+
   const tickerItems = (upcoming.length ? upcoming.map(t => {
     const d = daysUntil(t.deadline);
     const dLabel = d === 0 ? '<span class="hot">DUE TODAY</span>'
       : d <= 3 ? `<span class="hot">${d}D LEFT</span>`
       : `${d}D LEFT`;
-    return `<span class="ticker-item"><span class="sep">&#x25B6;</span>${esc(t.subject)} — ${esc(t.title)} — ${dLabel}</span>`;
+    return `<span class="ticker-item"><span class="sep">&#x25B6;</span>${esc(t.label)} — ${esc(t.title)} — ${dLabel}</span>`;
   }) : ['<span class="ticker-item"><span class="sep">&#x25B6;</span>NO DEADLINES IN THE NEXT 14 DAYS — CLEAR RUNWAY</span>']).join('');
 
   const stats = [
-    { v: tasks.length,    l: 'TOTAL TASKS',   cls: '' },
+    { v: notDone.length,  l: 'OPEN',          cls: '' },
     { v: overdue.length,  l: 'OVERDUE',       cls: 'stat-danger' },
     { v: thisWeek.length, l: 'DUE THIS WEEK', cls: 'stat-review' },
-    { v: done.length,     l: 'DONE',          cls: 'stat-done' },
+    { v: openDev.length,  l: 'DEV TASKS',     cls: 'stat-done' },
   ];
 
   container.innerHTML = `
@@ -284,12 +342,9 @@ function renderDashboard() {
         <div class="task-list">
           ${urgent.length ? urgent.map(t => {
             const days = daysUntil(t.deadline);
-            const isOverdue = days !== null && days < 0 && t.status !== 'DONE';
-            const daysLabel = days === null ? '' : isOverdue
-              ? `<span class="due-chip chip-danger">${Math.abs(days)}d OVERDUE</span>`
-              : `<span class="due-chip">${days}d LEFT</span>`;
+            const isOverdue = days !== null && days < 0;
             return `<div class="task-row ${isOverdue ? 'overdue-row' : ''}">
-              <div class="task-title">${esc(t.title)} ${daysLabel}</div>
+              <div class="task-title">${esc(t.title)} ${dueChip(t.deadline, t.status)}</div>
               <div>${subjectBadge(t.subject)}</div>
               <div class="priority-badge p-${t.priority}">${t.priority}</div>
               <div class="status-badge s-${t.status}">${fmtStatus(t.status)}</div>
@@ -326,7 +381,7 @@ function renderDashboard() {
         </div>
         <div class="notice-progress"><div class="notice-progress-fill" style="width:${yearPct}%"></div></div>
         <div class="notice-footer">
-          <span>IB DIPLOMA — 2025/26</span>
+          <span>IB DIPLOMA — ${YEAR_LABEL}</span>
           <span>YEAR ${yearPct}% ELAPSED</span>
           <span>${new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()}</span>
         </div>
@@ -342,7 +397,7 @@ let filterSubject = '', filterStatus = 'ACTIVE', filterPriority = '';
 let sortField = 'deadline', sortDir = 'asc';
 
 const PRIORITY_ORDER = { HIGH: 0, NORMAL: 1, LOW: 2 };
-const STATUS_ORDER   = { BLOCKED: 0, IN_PROGRESS: 1, REVIEW: 2, TODO: 3, DONE: 4 };
+const STATUS_ORDER   = { BLOCKED: 0, IN_PROGRESS: 1, TODO: 2, DONE: 3 };
 
 function initAssignments() {
   const container = document.querySelector('main [data-view="assignments"]');
@@ -386,7 +441,7 @@ function initAssignments() {
       <span id="sync-status" class="mono-label sync-label"></span>
     </div>
     <div id="task-table-container"></div>
-    <div id="task-board-container" class="board-container board-5col" style="display:none"></div>`;
+    <div id="task-board-container" class="board-container" style="display:none"></div>`;
 
   document.getElementById('btn-assign-table').addEventListener('click', () => {
     assignmentViewMode = 'table'; renderAssignments();
@@ -413,7 +468,7 @@ function filteredTasks() {
   else if (filterStatus)         list = list.filter(t => t.status === filterStatus);
   if (filterPriority)            list = list.filter(t => t.priority === filterPriority);
 
-  list = [...list].sort((a, b) => {
+  return [...list].sort((a, b) => {
     let va, vb;
     if (sortField === 'deadline') {
       va = a.deadline ? new Date(a.deadline).getTime() : Infinity;
@@ -435,8 +490,6 @@ function filteredTasks() {
     if (va > vb) return sortDir === 'asc' ? 1 : -1;
     return 0;
   });
-
-  return list;
 }
 
 function renderAssignments() {
@@ -447,16 +500,12 @@ function renderAssignments() {
   boardBtn.classList.toggle('view-active', assignmentViewMode === 'board');
 
   // Sync filter dropdowns
-  const subj = document.getElementById('filter-subject');
-  const stat = document.getElementById('filter-astatus');
-  const pri  = document.getElementById('filter-apriority');
-  if (subj) subj.value = filterSubject;
-  if (stat) stat.value = filterStatus;
-  if (pri)  pri.value  = filterPriority;
-  const sortFieldEl = document.getElementById('sort-field');
-  const sortDirEl   = document.getElementById('sort-dir');
-  if (sortFieldEl) sortFieldEl.value = sortField;
-  if (sortDirEl)   sortDirEl.value   = sortDir;
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  setVal('filter-subject', filterSubject);
+  setVal('filter-astatus', filterStatus);
+  setVal('filter-apriority', filterPriority);
+  setVal('sort-field', sortField);
+  setVal('sort-dir', sortDir);
 
   const list = filteredTasks();
   const tableContainer = document.getElementById('task-table-container');
@@ -495,6 +544,7 @@ function renderAssignmentTable(list, container) {
         <div class="priority-dot p-dot-${t.priority} clickable-task-priority" data-id="${t.id}" title="Click to cycle priority (${t.priority})" style="cursor:pointer"></div>
         <div class="task-title">${esc(t.title)}
           ${t.notes ? `<span class="due-chip" title="${esc(t.notes)}">NOTE</span>` : ''}
+          ${t.managebacUrl ? `<a href="${esc(t.managebacUrl)}" target="_blank" rel="noopener" class="due-chip chip-link" title="Open in ManageBac">MB ↗</a>` : ''}
         </div>
         <div>${subjectBadge(t.subject)}</div>
         <div class="task-assignee">${fmtDate(t.deadline)}</div>
@@ -514,26 +564,18 @@ function renderAssignmentTable(list, container) {
   container.querySelectorAll('.delete-task-btn').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      if (btn.dataset.confirm) {
+      armDelete(btn, '&#x2715;', () => {
         const t = tasks.find(t => t.id === btn.dataset.id);
         if (t?.notionId) archiveNotionTask(t.notionId).catch(err => console.error('Notion delete failed:', err));
         deleteTask(btn.dataset.id);
         renderAndRefreshDash();
-      } else {
-        btn.dataset.confirm = '1';
-        btn.textContent = 'SURE?';
-        btn.style.color = 'var(--status-blocked)';
-        setTimeout(() => {
-          if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; }
-        }, 3000);
-      }
+      });
     });
   });
 
   bindTaskCycleClicks(container);
 }
 
-const TASK_STATUS_CYCLE   = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
 const TASK_PRIORITY_CYCLE = ['HIGH', 'NORMAL', 'LOW'];
 
 function bindTaskCycleClicks(container) {
@@ -542,9 +584,8 @@ function bindTaskCycleClicks(container) {
       e.stopPropagation();
       const t = tasks.find(t => t.id === el.dataset.id);
       if (!t) return;
-      const next = TASK_STATUS_CYCLE[(TASK_STATUS_CYCLE.indexOf(t.status) + 1) % TASK_STATUS_CYCLE.length];
-      updateTask(el.dataset.id, { status: next });
-      schedulePush('assignments', el.dataset.id);
+      updateTask(t.id, { status: STATUS[(STATUS.indexOf(t.status) + 1) % STATUS.length] });
+      schedulePush('assignments', t.id);
       renderAndRefreshDash();
     });
   });
@@ -554,16 +595,15 @@ function bindTaskCycleClicks(container) {
       const t = tasks.find(t => t.id === el.dataset.id);
       if (!t) return;
       const next = TASK_PRIORITY_CYCLE[(TASK_PRIORITY_CYCLE.indexOf(t.priority) + 1) % TASK_PRIORITY_CYCLE.length];
-      updateTask(el.dataset.id, { priority: next });
-      schedulePush('assignments', el.dataset.id);
+      updateTask(t.id, { priority: next });
+      schedulePush('assignments', t.id);
       renderAndRefreshDash();
     });
   });
 }
 
 function renderAssignmentBoard(list, container) {
-  const COLS = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
-  container.innerHTML = COLS.map(col => {
+  container.innerHTML = STATUS.map(col => {
     const colTasks = list.filter(t => t.status === col);
     return `<div class="board-col">
       <div class="board-col-header">
@@ -571,64 +611,64 @@ function renderAssignmentBoard(list, container) {
         <span class="mono-label board-col-count">${colTasks.length}</span>
       </div>
       <div class="board-col-cards task-drop-zone" data-col="${col}">
-        ${colTasks.map(t => {
-          const days = daysUntil(t.deadline);
-          const isOverdue = days !== null && days < 0 && t.status !== 'DONE';
-          const daysChip = days !== null
-            ? `<span class="due-chip ${isOverdue ? 'chip-danger' : ''}">${isOverdue ? Math.abs(days) + 'd OVERDUE' : days < 0 ? Math.abs(days) + 'd ago' : days + 'd LEFT'}</span>`
-            : '';
-          return `<div class="board-card s-border-${t.status}" draggable="true" data-id="${t.id}">
+        ${colTasks.map(t => `
+          <div class="board-card s-border-${t.status}" draggable="true" data-id="${t.id}">
             <div class="card-title-row">
               <div class="card-title">${esc(t.title)}</div>
             </div>
             <div style="margin-bottom:6px">${subjectBadge(t.subject)}</div>
             <div class="card-meta">
               <span class="priority-badge p-${t.priority} clickable-task-priority" data-id="${t.id}" title="Click to cycle priority" style="cursor:pointer">${t.priority}</span>
-              ${daysChip}
+              ${dueChip(t.deadline, t.status)}
             </div>
-            <div style="margin-top:6px">
-              <span class="status-badge s-${t.status} clickable-task-status" data-id="${t.id}" title="Click to cycle status" style="cursor:pointer">${fmtStatus(t.status)}</span>
-            </div>
-          </div>`;
-        }).join('')}
+          </div>`).join('')}
       </div>
     </div>`;
   }).join('');
 
-  container.querySelectorAll('.board-card[draggable]').forEach(card => {
-    card.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', card.dataset.id); card.classList.add('dragging'); });
-    card.addEventListener('dragend', () => card.classList.remove('dragging'));
-  });
-
-  container.querySelectorAll('.task-drop-zone').forEach(zone => {
-    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-    zone.addEventListener('drop', e => {
-      e.preventDefault();
-      zone.classList.remove('drag-over');
-      const id = e.dataTransfer.getData('text/plain');
-      updateTask(id, { status: zone.dataset.col });
-      schedulePush('assignments', id);
-      renderAndRefreshDash();
-    });
+  bindBoardDrag(container, '.task-drop-zone', (id, col) => {
+    updateTask(id, { status: col });
+    schedulePush('assignments', id);
+    renderAndRefreshDash();
   });
 
   bindTaskCycleClicks(container);
 }
 
+// Shared drag-and-drop wiring for every status board in the app.
+function bindBoardDrag(container, zoneSelector, onDrop) {
+  container.querySelectorAll('.board-card[draggable]').forEach(card => {
+    card.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', card.dataset.id); card.classList.add('dragging'); });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  });
+  container.querySelectorAll(zoneSelector).forEach(zone => {
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      onDrop(e.dataTransfer.getData('text/plain'), zone.dataset.col);
+    });
+  });
+}
+
+function taskFields(t) {
+  return [
+    { name: 'title',    label: 'TITLE',    type: 'text',     required: true,  defaultValue: t?.title || '' },
+    { name: 'subject',  label: 'SUBJECT',  type: 'select',   required: true,  options: SUBJECTS, defaultValue: t?.subject || '' },
+    { name: 'type',     label: 'TYPE',     type: 'select',   required: false, options: [{ value: '', label: '— None —' }, ...TASK_TYPES], defaultValue: t?.type || '' },
+    { name: 'deadline', label: 'DEADLINE', type: 'date',     required: false, defaultValue: t?.deadline || '' },
+    { name: 'priority', label: 'PRIORITY', type: 'select',   required: true,  options: PRIORITY, defaultValue: t?.priority || 'NORMAL' },
+    { name: 'status',   label: 'STATUS',   type: 'select',   required: true,  options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), defaultValue: t?.status || 'TODO' },
+    { name: 'notes',    label: 'NOTES',    type: 'textarea', required: false, defaultValue: t?.notes || '' },
+    { name: 'body',     label: 'BODY',     type: 'textarea', required: false, defaultValue: t?.body || '' },
+  ];
+}
+
 function openNewTaskModal() {
   openModal({
     title: 'NEW TASK',
-    fields: [
-      { name: 'title',    label: 'TITLE',    type: 'text',     required: true },
-      { name: 'subject',  label: 'SUBJECT',  type: 'select',   options: SUBJECTS.map(s => ({ value: s, label: s })), required: true },
-      { name: 'type',     label: 'TYPE',     type: 'select',   options: TASK_TYPES.map(t => ({ value: t, label: t })), required: false },
-      { name: 'deadline', label: 'DEADLINE', type: 'date',     required: false },
-      { name: 'priority', label: 'PRIORITY', type: 'select',   options: PRIORITY.map(p => ({ value: p, label: p })), required: true },
-      { name: 'status',   label: 'STATUS',   type: 'select',   options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true },
-      { name: 'notes',    label: 'NOTES',    type: 'textarea', required: false },
-      { name: 'body',     label: 'BODY',     type: 'textarea', required: false },
-    ],
+    fields: taskFields(null),
     onSubmit(data) {
       const task = createTask(data);
       schedulePush('assignments', task.id);
@@ -643,16 +683,7 @@ function openEditTaskModal(id) {
   openModal({
     title: 'EDIT TASK',
     submitLabel: 'SAVE',
-    fields: [
-      { name: 'title',    label: 'TITLE',    type: 'text',     required: true, defaultValue: t.title },
-      { name: 'subject',  label: 'SUBJECT',  type: 'select',   options: SUBJECTS.map(s => ({ value: s, label: s })), required: true, defaultValue: t.subject },
-      { name: 'type',     label: 'TYPE',     type: 'select',   options: TASK_TYPES.map(t => ({ value: t, label: t })), required: false, defaultValue: t.type || '' },
-      { name: 'deadline', label: 'DEADLINE', type: 'date',     required: false, defaultValue: t.deadline || '' },
-      { name: 'priority', label: 'PRIORITY', type: 'select',   options: PRIORITY.map(p => ({ value: p, label: p })), required: true, defaultValue: t.priority },
-      { name: 'status',   label: 'STATUS',   type: 'select',   options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), required: true, defaultValue: t.status },
-      { name: 'notes',    label: 'NOTES',    type: 'textarea', required: false, defaultValue: t.notes || '' },
-      { name: 'body',     label: 'BODY',     type: 'textarea', required: false, defaultValue: t.body || '' },
-    ],
+    fields: taskFields(t),
     onSubmit(data) {
       updateTask(id, data);
       schedulePush('assignments', id);
@@ -664,22 +695,44 @@ function openEditTaskModal(id) {
 function renderAndRefreshDash() {
   renderAssignments();
   const dashView = document.querySelector('main [data-view="dashboard"]');
-  if (dashView && dashView.style.display !== 'none') {
-    renderDashboard();
-  }
+  if (dashView && dashView.style.display !== 'none') renderDashboard();
 }
 
 // ============================================================
-// CODING
+// CODING — two tabs over two Notion databases
 // ============================================================
+let codingTab = 'projects';
 let codingFilterStatus = 'ACTIVE';
-
-const CODING_STATUS_CYCLE = ['IDEA', 'IN_PROGRESS', 'PAUSED', 'SHIPPED', 'ARCHIVED'];
+let devFilterStatus = 'ACTIVE', devFilterProject = '', devViewMode = 'table';
 
 function renderCoding() {
   const container = document.querySelector('main [data-view="coding"]');
   if (!container) return;
 
+  container.innerHTML = `
+    <div class="view-toolbar" style="margin-bottom:0">
+      <div class="view-toggle">
+        <button class="toggle-btn coding-tab ${codingTab === 'projects' ? 'view-active' : ''}" data-tab="projects">PROJECTS</button>
+        <button class="toggle-btn coding-tab ${codingTab === 'tasks' ? 'view-active' : ''}" data-tab="tasks">TASKS</button>
+      </div>
+      <div class="view-context mono-label" style="margin-left:auto">
+        ${codingTab === 'projects' ? 'CODING PROJECTS — DEV LOG' : `CODING TASKS — ${codingTasks.filter(t => t.status !== 'DONE').length} OPEN`}
+      </div>
+    </div>
+    <div id="coding-content" style="margin-top:var(--spacing-md)"></div>`;
+
+  container.querySelectorAll('.coding-tab').forEach(btn => {
+    btn.addEventListener('click', () => { codingTab = btn.dataset.tab; renderCoding(); });
+  });
+
+  const content = document.getElementById('coding-content');
+  if (codingTab === 'projects') renderCodingProjects(content);
+  else renderCodingTasks(content);
+}
+
+// ── Coding projects ───────────────────────────────────────────────────────
+
+function renderCodingProjects(container) {
   let list = [...coding];
   if (codingFilterStatus === 'ACTIVE') list = list.filter(c => c.status !== 'SHIPPED' && c.status !== 'ARCHIVED');
   else if (codingFilterStatus)         list = list.filter(c => c.status === codingFilterStatus);
@@ -692,7 +745,6 @@ function renderCoding() {
 
   container.innerHTML = `
     <div class="view-toolbar">
-      <div class="view-context mono-label">CODING PROJECTS — DEV LOG</div>
       <div class="filter-bar">
         <select id="coding-filter-status" class="filter-select">
           <option value="ACTIVE">ACTIVE (not shipped)</option>
@@ -706,8 +758,9 @@ function renderCoding() {
     </div>
 
     <div class="project-grid">
-      ${list.length ? list.map(c => `
-        <div class="project-card">
+      ${list.length ? list.map(c => {
+        const open = codingTasks.filter(t => t.projectNotionId === c.notionId && t.status !== 'DONE').length;
+        return `<div class="project-card">
           <div class="project-phase-bar">
             <span class="mono-label clickable-coding-status" data-id="${c.id}"
               title="Click to cycle status" style="cursor:pointer;color:${statusColor[c.status] || '#555'}">● ${fmtStatus(c.status)}</span>
@@ -716,12 +769,13 @@ function renderCoding() {
           <div class="project-name display-text">${esc(c.name)}</div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">
             ${c.category ? `<span class="due-chip">${esc(c.category)}</span>` : ''}
-            ${(c.stack || []).map(s => `<span class="due-chip">${esc(s)}</span>`).join('')}
+            ${chips(c.stack)}
           </div>
           ${c.description ? `<div class="project-desc">${esc(c.description)}</div>` : ''}
           <div class="project-meta">
             <div class="project-stats">
-              ${c.started ? `<span class="mono-label">SINCE ${fmtDate(c.started)}</span>` : '<span class="mono-label" style="color:#444">—</span>'}
+              <span class="mono-label">${open} OPEN TASK${open === 1 ? '' : 'S'}</span>
+              ${c.started ? `<span class="mono-label" style="color:#444">/ SINCE ${fmtDate(c.started)}</span>` : ''}
             </div>
             <span class="mono-label" style="color:#444">${c.lastPushed ? 'PUSHED ' + fmtDate(c.lastPushed) : 'NO PUSHES'}</span>
           </div>
@@ -732,7 +786,8 @@ function renderCoding() {
               <button class="edit-btn coding-del" data-id="${c.id}">&#x2715; DELETE</button>
             </div>
           </div>
-        </div>`).join('')
+        </div>`;
+      }).join('')
       : '<div class="empty-state" style="grid-column:1/-1">No coding projects — sync with Notion or create one.</div>'}
     </div>`;
 
@@ -748,7 +803,7 @@ function renderCoding() {
       e.stopPropagation();
       const c = coding.find(c => c.id === el.dataset.id);
       if (!c) return;
-      const next = CODING_STATUS_CYCLE[(CODING_STATUS_CYCLE.indexOf(c.status) + 1) % CODING_STATUS_CYCLE.length];
+      const next = CODING_STATUSES[(CODING_STATUSES.indexOf(c.status) + 1) % CODING_STATUSES.length];
       updateCoding(c.id, { status: next });
       schedulePush('coding', c.id);
       renderCoding();
@@ -762,17 +817,12 @@ function renderCoding() {
   container.querySelectorAll('.coding-del').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      if (btn.dataset.confirm) {
+      armDelete(btn, '&#x2715; DELETE', () => {
         const c = coding.find(c => c.id === btn.dataset.id);
         if (c?.notionId) archiveNotionCoding(c.notionId).catch(err => console.error('Notion archive failed:', err));
         deleteCoding(btn.dataset.id);
         renderCoding();
-      } else {
-        btn.dataset.confirm = '1';
-        btn.textContent = 'SURE?';
-        btn.style.color = 'var(--status-blocked)';
-        setTimeout(() => { if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715; DELETE'; btn.style.color = ''; } }, 3000);
-      }
+      });
     });
   });
 }
@@ -786,161 +836,596 @@ function openCodingModal(id) {
       { name: 'name',        label: 'PROJECT NAME', defaultValue: c?.name || '' },
       { name: 'status',      label: 'STATUS',   type: 'select', options: CODING_STATUSES.map(s => ({ value: s, label: fmtStatus(s) })), defaultValue: c?.status || 'IDEA' },
       { name: 'category',    label: 'CATEGORY', type: 'select', required: false, options: [{ value: '', label: '— None —' }, ...CODING_CATEGORIES], defaultValue: c?.category || '' },
-      { name: 'stack',       label: 'STACK (comma-separated)', required: false, defaultValue: (c?.stack || []).join(', ') },
+      { name: 'stack',       label: 'STACK',    type: 'multi',  required: false, options: CODING_STACKS, defaultValue: c?.stack || [] },
       { name: 'type',        label: 'TYPE',     type: 'select', required: false, options: [{ value: '', label: '— None —' }, ...CODING_TYPES], defaultValue: c?.type || '' },
       { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false, defaultValue: c?.description || '' },
       { name: 'repoUrl',     label: 'REPO URL', type: 'url',  required: false, defaultValue: c?.repoUrl || '' },
       { name: 'started',     label: 'STARTED',  type: 'date', required: false, defaultValue: c?.started || '' },
     ],
     onSubmit(data) {
-      // Only keep stack entries Notion knows about — free-typed extras map to "Other"
-      const stack = [...new Set(data.stack.split(',').map(s => s.trim()).filter(Boolean)
-        .map(s => CODING_STACKS.find(k => k.toLowerCase() === s.toLowerCase()) || 'Other'))];
-      const patch = { ...data, stack };
       if (c) {
-        updateCoding(id, patch);
+        updateCoding(id, data);
         schedulePush('coding', id);
       } else {
-        const created = createCoding(patch);
-        schedulePush('coding', created.id);
+        schedulePush('coding', createCoding(data).id);
       }
       renderCoding();
     },
   });
 }
 
+// ── Coding tasks ──────────────────────────────────────────────────────────
+
+function projectName(notionId) {
+  return coding.find(c => c.notionId === notionId)?.name || '';
+}
+
+function filteredCodingTasks() {
+  let list = [...codingTasks];
+  if (devFilterStatus === 'ACTIVE') list = list.filter(t => t.status !== 'DONE');
+  else if (devFilterStatus)         list = list.filter(t => t.status === devFilterStatus);
+  if (devFilterProject)             list = list.filter(t => t.projectNotionId === devFilterProject);
+
+  // Priority first, then whichever deadlines exist — most dev tasks have none.
+  return list.sort((a, b) => {
+    const p = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
+    if (p !== 0) return p;
+    return (a.deadline || '9999').localeCompare(b.deadline || '9999');
+  });
+}
+
+function renderCodingTasks(container) {
+  const list = filteredCodingTasks();
+  const projectOptions = coding
+    .filter(c => c.notionId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  container.innerHTML = `
+    <div class="view-toolbar">
+      <div class="view-toggle">
+        <button id="btn-dev-table" class="toggle-btn ${devViewMode === 'table' ? 'view-active' : ''}">TABLE</button>
+        <button id="btn-dev-board" class="toggle-btn ${devViewMode === 'board' ? 'view-active' : ''}">BOARD</button>
+      </div>
+      <div class="filter-bar">
+        <select id="dev-filter-status" class="filter-select">
+          <option value="ACTIVE">ACTIVE (not done)</option>
+          <option value="">ALL STATUS</option>
+          ${STATUS.map(s => `<option value="${s}">${fmtStatus(s)}</option>`).join('')}
+        </select>
+        <select id="dev-filter-project" class="filter-select">
+          <option value="">ALL PROJECTS</option>
+          ${projectOptions.map(c => `<option value="${esc(c.notionId)}">${esc(c.name)}</option>`).join('')}
+        </select>
+      </div>
+      <button id="btn-new-dev-task" class="action-btn">+ NEW TASK</button>
+      <button id="btn-sync-notion-devtasks" class="action-btn ghost">⟳ SYNC NOTION</button>
+      <span id="sync-status-devtasks" class="mono-label sync-label"></span>
+    </div>
+    <div id="dev-task-body"></div>`;
+
+  const statusEl  = document.getElementById('dev-filter-status');
+  const projectEl = document.getElementById('dev-filter-project');
+  statusEl.value  = devFilterStatus;
+  projectEl.value = devFilterProject;
+  statusEl.addEventListener('change',  e => { devFilterStatus  = e.target.value; renderCoding(); });
+  projectEl.addEventListener('change', e => { devFilterProject = e.target.value; renderCoding(); });
+
+  document.getElementById('btn-dev-table').addEventListener('click', () => { devViewMode = 'table'; renderCoding(); });
+  document.getElementById('btn-dev-board').addEventListener('click', () => { devViewMode = 'board'; renderCoding(); });
+  document.getElementById('btn-new-dev-task').addEventListener('click', () => openCodingTaskModal());
+  document.getElementById('btn-sync-notion-devtasks').addEventListener('click', syncCodingTasksWithNotion);
+
+  const body = document.getElementById('dev-task-body');
+  if (devViewMode === 'table') renderCodingTaskTable(list, body);
+  else renderCodingTaskBoard(list, body);
+}
+
+function renderCodingTaskTable(list, container) {
+  const cols = '12px 1fr 160px 90px 110px 70px';
+  container.innerHTML = `
+    <div class="task-row table-header" style="grid-template-columns:${cols}">
+      <div></div>
+      <div class="mono-label">TASK</div>
+      <div class="mono-label">PROJECT</div>
+      <div class="mono-label">DUE</div>
+      <div class="mono-label">STATUS</div>
+      <div></div>
+    </div>
+    ${list.length ? list.map(t => {
+      const days = daysUntil(t.deadline);
+      const overdue = days !== null && days < 0 && t.status !== 'DONE';
+      return `<div class="task-row ${overdue ? 'overdue-row' : ''}" data-id="${t.id}" style="grid-template-columns:${cols}">
+        <div class="priority-dot p-dot-${t.priority} clickable-dev-priority" data-id="${t.id}" title="Click to cycle priority (${t.priority})" style="cursor:pointer"></div>
+        <div class="task-title">${esc(t.title)}
+          ${t.notes ? `<span class="due-chip" title="${esc(t.notes)}">NOTE</span>` : ''}
+        </div>
+        <div class="task-assignee">${esc(projectName(t.projectNotionId) || '—')}</div>
+        <div class="task-assignee">${fmtDate(t.deadline)}</div>
+        <div class="status-badge s-${t.status} clickable-dev-status" data-id="${t.id}" title="Click to cycle status" style="cursor:pointer">${fmtStatus(t.status)}</div>
+        <div class="ticket-actions">
+          <button class="edit-btn dev-edit" data-id="${t.id}" title="Edit">&#x270E;</button>
+          <button class="edit-btn dev-del" data-id="${t.id}" title="Delete">&#x2715;</button>
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty-state">No dev tasks match the current filters.</div>'}`;
+
+  bindCodingTaskControls(container);
+}
+
+function renderCodingTaskBoard(list, container) {
+  container.className = 'board-container';
+  container.innerHTML = STATUS.map(col => {
+    const colTasks = list.filter(t => t.status === col);
+    return `<div class="board-col">
+      <div class="board-col-header">
+        <span class="status-badge s-${col}">${fmtStatus(col)}</span>
+        <span class="mono-label board-col-count">${colTasks.length}</span>
+      </div>
+      <div class="board-col-cards dev-drop-zone" data-col="${col}">
+        ${colTasks.map(t => `
+          <div class="board-card s-border-${t.status}" draggable="true" data-id="${t.id}">
+            <div class="card-title-row">
+              <div class="card-title">${esc(t.title)}</div>
+              <button class="edit-btn dev-edit" data-id="${t.id}" title="Edit">&#x270E;</button>
+            </div>
+            ${projectName(t.projectNotionId) ? `<div style="margin-bottom:6px"><span class="due-chip">${esc(projectName(t.projectNotionId))}</span></div>` : ''}
+            <div class="card-meta">
+              <span class="priority-badge p-${t.priority} clickable-dev-priority" data-id="${t.id}" title="Click to cycle priority" style="cursor:pointer">${t.priority}</span>
+              ${dueChip(t.deadline, t.status)}
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  bindBoardDrag(container, '.dev-drop-zone', (id, col) => {
+    updateCodingTask(id, { status: col });
+    schedulePush('codingTasks', id);
+    renderCoding();
+  });
+  bindCodingTaskControls(container);
+}
+
+function bindCodingTaskControls(container) {
+  container.querySelectorAll('.clickable-dev-status').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const t = codingTasks.find(t => t.id === el.dataset.id);
+      if (!t) return;
+      updateCodingTask(t.id, { status: STATUS[(STATUS.indexOf(t.status) + 1) % STATUS.length] });
+      schedulePush('codingTasks', t.id);
+      renderCoding();
+    });
+  });
+  container.querySelectorAll('.clickable-dev-priority').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const t = codingTasks.find(t => t.id === el.dataset.id);
+      if (!t) return;
+      const next = TASK_PRIORITY_CYCLE[(TASK_PRIORITY_CYCLE.indexOf(t.priority) + 1) % TASK_PRIORITY_CYCLE.length];
+      updateCodingTask(t.id, { priority: next });
+      schedulePush('codingTasks', t.id);
+      renderCoding();
+    });
+  });
+  container.querySelectorAll('.dev-edit').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); openCodingTaskModal(btn.dataset.id); });
+  });
+  container.querySelectorAll('.dev-del').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      armDelete(btn, '&#x2715;', () => {
+        const t = codingTasks.find(t => t.id === btn.dataset.id);
+        if (t?.notionId) archiveNotionCodingTask(t.notionId).catch(err => console.error('Notion archive failed:', err));
+        deleteCodingTask(btn.dataset.id);
+        renderCoding();
+      });
+    });
+  });
+}
+
+function openCodingTaskModal(id) {
+  const t = id ? codingTasks.find(t => t.id === id) : null;
+  const projectOptions = [
+    { value: '', label: '— None (learning goal / no repo) —' },
+    ...coding.filter(c => c.notionId).sort((a, b) => a.name.localeCompare(b.name))
+      .map(c => ({ value: c.notionId, label: c.name })),
+  ];
+  openModal({
+    title: t ? 'EDIT DEV TASK' : 'NEW DEV TASK',
+    submitLabel: t ? 'SAVE' : 'CREATE',
+    fields: [
+      { name: 'title',           label: 'TASK',     defaultValue: t?.title || '' },
+      { name: 'projectNotionId', label: 'PROJECT',  type: 'select', required: false, options: projectOptions, defaultValue: t?.projectNotionId || '' },
+      { name: 'status',          label: 'STATUS',   type: 'select', options: STATUS.map(s => ({ value: s, label: fmtStatus(s) })), defaultValue: t?.status || 'TODO' },
+      { name: 'priority',        label: 'PRIORITY', type: 'select', options: PRIORITY, defaultValue: t?.priority || 'NORMAL' },
+      { name: 'deadline',        label: 'DUE (optional)', type: 'date', required: false, defaultValue: t?.deadline || '' },
+      { name: 'notes',           label: 'NOTES',    type: 'textarea', required: false, defaultValue: t?.notes || '' },
+    ],
+    onSubmit(data) {
+      if (t) {
+        updateCodingTask(id, data);
+        schedulePush('codingTasks', id);
+      } else {
+        schedulePush('codingTasks', createCodingTask(data).id);
+      }
+      renderCoding();
+    },
+  });
+}
 
 // ============================================================
 // GREEK PORTFOLIO
+// One card per Notion portfolio entry.
 // ============================================================
+let greekFilterText = '', greekFilterAssessment = '', greekFilterStatus = '';
+
+// The portfolio DB says "Not Started" where the rest of the app says "To Do".
+// Same three states, so only the label differs.
+const GREEK_STATUS_LABELS = { TODO: 'NOT STARTED', IN_PROGRESS: 'IN PROGRESS', DONE: 'DONE' };
+
 function renderGreekPortfolio() {
   const container = document.querySelector('main [data-view="greek-portfolio"]');
   if (!container) return;
 
-  const slots = Math.max(4, greek.texts.length);
-  const finalCount = greek.texts.filter(t => t.status === 'FINAL').length;
-  const segments = greek.texts.map(t =>
-    `<div class="greek-seg seg-${t.status}" title="${esc(t.title)} — ${esc(t.status)}"></div>`
-  ).join('') + '<div class="greek-seg"></div>'.repeat(slots - greek.texts.length);
+  let list = [...greek];
+  if (greekFilterText)       list = list.filter(e => (e.texts || []).includes(greekFilterText));
+  if (greekFilterAssessment) list = list.filter(e => (e.assessment || []).includes(greekFilterAssessment));
+  if (greekFilterStatus)     list = list.filter(e => e.status === greekFilterStatus);
+  list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  const doneCount = greek.filter(e => e.status === 'DONE').length;
+  const onMB      = greek.filter(e => e.onManageBac).length;
+  const pct       = greek.length ? Math.round((doneCount / greek.length) * 100) : 0;
 
   container.innerHTML = `
     <div class="view-toolbar">
-      <div class="view-context mono-label">LANGUAGE B HL — ORAL PORTFOLIO</div>
+      <div class="view-context mono-label">MODERN GREEK A SL — PORTFOLIO</div>
+      <div class="filter-bar">
+        <select id="greek-filter-text" class="filter-select">
+          <option value="">ALL TEXTS</option>
+          ${GREEK_TEXTS.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+        </select>
+        <select id="greek-filter-assessment" class="filter-select">
+          <option value="">ALL ASSESSMENTS</option>
+          ${GREEK_ASSESSMENT.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}
+        </select>
+        <select id="greek-filter-status" class="filter-select">
+          <option value="">ALL STATUS</option>
+          ${GREEK_STATUSES.map(s => `<option value="${s}">${fmtStatus(s)}</option>`).join('')}
+        </select>
+      </div>
+      <button id="btn-new-greek" class="action-btn">+ NEW ENTRY</button>
       <button id="btn-sync-notion-greek" class="action-btn ghost">⟳ SYNC NOTION</button>
       <span id="sync-status-greek" class="mono-label sync-label"></span>
     </div>
 
     <div class="greek-top">
-      <!-- Global Issue -->
-      <div class="data-section">
-        <span class="panel-label mono-label">GLOBAL ISSUE</span>
-        <textarea id="greek-global" class="issue-input" rows="3"
-          placeholder="Define the global issue connecting your portfolio texts…">${esc(greek.globalIssue)}</textarea>
-      </div>
-
-      <!-- Progress -->
       <div class="data-section">
         <span class="panel-label mono-label">PORTFOLIO PROGRESS</span>
-        <div class="greek-progress-num display-text">${finalCount}<span>/${slots}</span></div>
-        <div class="greek-segments">${segments}</div>
-        <span class="mono-label panel-foot">TEXTS FINALISED</span>
+        <div class="greek-progress-num display-text">${doneCount}<span>/${greek.length}</span></div>
+        <div class="notice-progress"><div class="notice-progress-fill" style="width:${pct}%"></div></div>
+        <span class="mono-label panel-foot">ENTRIES COMPLETE</span>
+      </div>
+      <div class="data-section">
+        <span class="panel-label mono-label">ON MANAGEBAC</span>
+        <div class="greek-progress-num display-text">${onMB}<span>/${greek.length}</span></div>
+        <div class="notice-progress"><div class="notice-progress-fill" style="width:${greek.length ? Math.round((onMB / greek.length) * 100) : 0}%"></div></div>
+        <span class="mono-label panel-foot">ENTRIES SUBMITTED</span>
       </div>
     </div>
 
-    <!-- Texts -->
     <div class="greek-grid">
-      ${greek.texts.length ? greek.texts.map((t, i) => `
-        <div class="greek-card seg-border-${t.status}">
+      ${list.length ? list.map((e, i) => `
+        <div class="greek-card seg-border-${e.status}">
           <div class="greek-card-head">
             <span class="greek-card-index display-text">${String(i + 1).padStart(2, '0')}</span>
-            <span class="status-badge s-greek-${t.status}">${esc(t.status)}</span>
+            <span class="mono-label" style="color:var(--ink-3)">${fmtDate(e.date)}</span>
           </div>
-          <div class="greek-card-title">${esc(t.title)}</div>
+          <div class="greek-card-title">${esc(e.title)}</div>
           <div class="greek-stepper">
-            ${GREEK_TEXT_STATUSES.map(s => `
-              <button class="greek-status-step ${t.status === s ? 'step-active' : ''}"
-                data-id="${t.id}" data-status="${s}">${s}</button>`).join('')}
+            ${GREEK_STATUSES.map(s => `
+              <button class="greek-status-step ${e.status === s ? 'step-active' : ''}"
+                data-id="${e.id}" data-status="${s}">${GREEK_STATUS_LABELS[s]}</button>`).join('')}
           </div>
-          <div class="greek-card-fields">
-            <label class="mono-label">WORDS
-              <input type="number" class="greek-wc-input" data-id="${t.id}" value="${t.wordCount || 0}" min="0">
-            </label>
-            <label class="mono-label">NOTES
-              <textarea class="greek-notes-input" data-id="${t.id}" rows="2" placeholder="—">${esc(t.notes || '')}</textarea>
-            </label>
+          <div class="greek-chip-rows">
+            ${e.texts?.length      ? `<div class="greek-chip-row"><span class="mono-label">TEXT</span>${chips(e.texts)}</div>` : ''}
+            ${e.assessment?.length ? `<div class="greek-chip-row"><span class="mono-label">ASSESS</span>${chips(e.assessment)}</div>` : ''}
+            ${e.concepts?.length   ? `<div class="greek-chip-row"><span class="mono-label">CONCEPT</span>${chips(e.concepts)}</div>` : ''}
+            ${e.areas?.length      ? `<div class="greek-chip-row"><span class="mono-label">AREA</span>${chips(e.areas)}</div>` : ''}
+            ${e.skills?.length     ? `<div class="greek-chip-row"><span class="mono-label">SKILL</span>${chips(e.skills)}</div>` : ''}
+          </div>
+          <div class="greek-card-foot">
+            <button class="edit-btn greek-mb-toggle ${e.onManageBac ? 'mb-on' : ''}" data-id="${e.id}"
+              title="Toggle ManageBac submission">${e.onManageBac ? '✓ ON MANAGEBAC' : 'NOT ON MANAGEBAC'}</button>
+            <div class="project-action-btns">
+              <button class="edit-btn greek-edit" data-id="${e.id}">&#x270E; EDIT</button>
+              <button class="edit-btn greek-del" data-id="${e.id}">&#x2715;</button>
+            </div>
           </div>
         </div>`).join('')
-      : '<div class="empty-state">No texts yet — sync with Notion to pull your portfolio.</div>'}
+      : '<div class="empty-state" style="grid-column:1/-1">No entries match the current filters — sync with Notion or add one.</div>'}
     </div>`;
 
-  // Global issue auto-save
-  document.getElementById('greek-global').addEventListener('blur', e => {
-    updateGreek({ globalIssue: e.target.value });
-  });
+  const textEl   = document.getElementById('greek-filter-text');
+  const assessEl = document.getElementById('greek-filter-assessment');
+  const statusEl = document.getElementById('greek-filter-status');
+  textEl.value   = greekFilterText;
+  assessEl.value = greekFilterAssessment;
+  statusEl.value = greekFilterStatus;
+  textEl.addEventListener('change',   e => { greekFilterText       = e.target.value; renderGreekPortfolio(); });
+  assessEl.addEventListener('change', e => { greekFilterAssessment = e.target.value; renderGreekPortfolio(); });
+  statusEl.addEventListener('change', e => { greekFilterStatus     = e.target.value; renderGreekPortfolio(); });
 
-  // Status stepper — click a state to set it directly
+  document.getElementById('btn-new-greek').addEventListener('click', () => openGreekModal());
+  document.getElementById('btn-sync-notion-greek').addEventListener('click', syncGreekWithNotion);
+
   container.querySelectorAll('.greek-status-step').forEach(btn => {
     btn.addEventListener('click', () => {
-      updateGreekText(btn.dataset.id, { status: btn.dataset.status });
+      updateGreekEntry(btn.dataset.id, { status: btn.dataset.status });
       schedulePush('greek', btn.dataset.id);
       renderGreekPortfolio();
     });
   });
 
-  // Word count inputs
-  container.querySelectorAll('.greek-wc-input').forEach(input => {
-    input.addEventListener('change', e => {
-      updateGreekText(e.target.dataset.id, { wordCount: parseInt(e.target.value, 10) || 0 });
+  container.querySelectorAll('.greek-mb-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const e = greek.find(e => e.id === btn.dataset.id);
+      if (!e) return;
+      updateGreekEntry(e.id, { onManageBac: !e.onManageBac });
+      schedulePush('greek', e.id);
       renderGreekPortfolio();
     });
   });
 
-  document.getElementById('btn-sync-notion-greek').addEventListener('click', syncGreekWithNotion);
+  container.querySelectorAll('.greek-edit').forEach(btn => {
+    btn.addEventListener('click', () => openGreekModal(btn.dataset.id));
+  });
 
-  // Notes textareas
-  container.querySelectorAll('.greek-notes-input').forEach(ta => {
-    ta.addEventListener('blur', e => {
-      updateGreekText(e.target.dataset.id, { notes: e.target.value });
+  container.querySelectorAll('.greek-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      armDelete(btn, '&#x2715;', () => {
+        const e = greek.find(e => e.id === btn.dataset.id);
+        if (e?.notionId) archiveNotionText(e.notionId).catch(err => console.error('Notion archive failed:', err));
+        deleteGreekEntry(btn.dataset.id);
+        renderGreekPortfolio();
+      });
     });
+  });
+}
+
+function openGreekModal(id) {
+  const e = id ? greek.find(e => e.id === id) : null;
+  openModal({
+    title: e ? 'EDIT ENTRY' : 'NEW ENTRY',
+    submitLabel: e ? 'SAVE' : 'CREATE',
+    fields: [
+      { name: 'title',       label: 'TITLE',  defaultValue: e?.title || '' },
+      { name: 'status',      label: 'STATUS', type: 'select', options: GREEK_STATUSES.map(s => ({ value: s, label: fmtStatus(s) })), defaultValue: e?.status || 'TODO' },
+      { name: 'date',        label: 'DATE',   type: 'date', required: false, defaultValue: e?.date || '' },
+      { name: 'texts',       label: 'TEXT / WORK / NOVEL',  type: 'multi', required: false, options: GREEK_TEXTS,      defaultValue: e?.texts || [] },
+      { name: 'assessment',  label: 'ASSESSMENT',           type: 'multi', required: false, options: GREEK_ASSESSMENT, defaultValue: e?.assessment || [] },
+      { name: 'areas',       label: 'AREAS OF EXPLORATION', type: 'multi', required: false, options: GREEK_AREAS,      defaultValue: e?.areas || [] },
+      { name: 'concepts',    label: 'CONCEPTS',             type: 'multi', required: false, options: GREEK_CONCEPTS,   defaultValue: e?.concepts || [] },
+      { name: 'fields',      label: 'FIELDS OF INQUIRY',    type: 'multi', required: false, options: GREEK_FIELDS,     defaultValue: e?.fields || [] },
+      { name: 'readingLog',  label: 'READING LOG',          type: 'multi', required: false, options: GREEK_READING,    defaultValue: e?.readingLog || [] },
+      { name: 'skills',      label: 'SKILLS',               type: 'multi', required: false, options: GREEK_SKILLS,     defaultValue: e?.skills || [] },
+      { name: 'onManageBac', label: 'ON MANAGEBAC',         type: 'checkbox', required: false, defaultValue: !!e?.onManageBac },
+    ],
+    onSubmit(data) {
+      if (e) {
+        updateGreekEntry(id, data);
+        schedulePush('greek', id);
+      } else {
+        schedulePush('greek', createGreekEntry(data).id);
+      }
+      renderGreekPortfolio();
+    },
+  });
+}
+
+// ============================================================
+// SIDE QUESTS
+// A record of things that happened. Not a task board.
+// ============================================================
+let questFilterStatus = '', questFilterCategory = '', questFilterYear = '';
+
+function renderSideQuests() {
+  const container = document.querySelector('main [data-view="side-quests"]');
+  if (!container) return;
+
+  let list = [...quests];
+  if (questFilterStatus)   list = list.filter(q => q.status === questFilterStatus);
+  if (questFilterCategory) list = list.filter(q => (q.category || []).includes(questFilterCategory));
+  if (questFilterYear)     list = list.filter(q => q.schoolYear === questFilterYear);
+  list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  const statusColor = { ONGOING: 'var(--accent)', DONE: 'var(--status-done)', DROPPED: '#555' };
+
+  container.innerHTML = `
+    <div class="view-toolbar">
+      <div class="view-context mono-label">SIDE QUESTS — ${quests.filter(q => q.status === 'ONGOING').length} ONGOING / ${quests.length} LOGGED</div>
+      <div class="filter-bar">
+        <select id="quest-filter-status" class="filter-select">
+          <option value="">ALL STATUS</option>
+          ${SIDE_QUEST_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('')}
+        </select>
+        <select id="quest-filter-category" class="filter-select">
+          <option value="">ALL CATEGORIES</option>
+          ${SIDE_QUEST_CATEGORIES.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+        </select>
+        <select id="quest-filter-year" class="filter-select">
+          <option value="">ALL YEARS</option>
+          ${SCHOOL_YEARS.map(y => `<option value="${esc(y)}">${esc(y)}</option>`).join('')}
+        </select>
+      </div>
+      <button id="btn-new-quest" class="action-btn">+ NEW QUEST</button>
+      <button id="btn-sync-notion-quests" class="action-btn ghost">⟳ SYNC NOTION</button>
+      <span id="sync-status-quests" class="mono-label sync-label"></span>
+    </div>
+
+    <div class="project-grid">
+      ${list.length ? list.map(q => `
+        <div class="project-card">
+          <div class="project-phase-bar">
+            <span class="mono-label clickable-quest-status" data-id="${q.id}"
+              title="Click to cycle status" style="cursor:pointer;color:${statusColor[q.status] || '#555'}">● ${q.status}</span>
+            ${q.link ? `<a href="${esc(q.link)}" target="_blank" rel="noopener" class="edit-btn" style="text-decoration:none;margin-left:auto" title="Open link">↗</a>` : ''}
+          </div>
+          <div class="project-name display-text">${esc(q.name)}</div>
+          ${q.role ? `<div class="project-desc"><span class="mono-label" style="color:#555">ROLE: </span>${esc(q.role)}</div>` : ''}
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">
+            ${chips(q.category)}
+            ${chips(q.businessVenture)}
+          </div>
+          ${q.outcome ? `<div class="project-desc"><span class="mono-label" style="color:#555">OUTCOME: </span>${esc(q.outcome)}</div>` : ''}
+          ${q.notes   ? `<div class="project-desc">${esc(q.notes)}</div>` : ''}
+          <div class="project-meta">
+            <div class="project-stats">
+              <span class="mono-label">${q.schoolYear || '—'}</span>
+            </div>
+            <span class="mono-label" style="color:#444">${q.date ? fmtDate(q.date) : 'NO DATE'}</span>
+          </div>
+          <div class="project-card-actions">
+            <span class="mono-label" style="color:#444"></span>
+            <div class="project-action-btns">
+              <button class="edit-btn quest-edit" data-id="${q.id}">&#x270E; EDIT</button>
+              <button class="edit-btn quest-del" data-id="${q.id}">&#x2715; DELETE</button>
+            </div>
+          </div>
+        </div>`).join('')
+      : '<div class="empty-state" style="grid-column:1/-1">No side quests match the current filters.</div>'}
+    </div>`;
+
+  const statusEl = document.getElementById('quest-filter-status');
+  const catEl    = document.getElementById('quest-filter-category');
+  const yearEl   = document.getElementById('quest-filter-year');
+  statusEl.value = questFilterStatus;
+  catEl.value    = questFilterCategory;
+  yearEl.value   = questFilterYear;
+  statusEl.addEventListener('change', e => { questFilterStatus   = e.target.value; renderSideQuests(); });
+  catEl.addEventListener('change',    e => { questFilterCategory = e.target.value; renderSideQuests(); });
+  yearEl.addEventListener('change',   e => { questFilterYear     = e.target.value; renderSideQuests(); });
+
+  document.getElementById('btn-new-quest').addEventListener('click', () => openQuestModal());
+  document.getElementById('btn-sync-notion-quests').addEventListener('click', syncQuestsWithNotion);
+
+  container.querySelectorAll('.clickable-quest-status').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const q = quests.find(q => q.id === el.dataset.id);
+      if (!q) return;
+      const next = SIDE_QUEST_STATUSES[(SIDE_QUEST_STATUSES.indexOf(q.status) + 1) % SIDE_QUEST_STATUSES.length];
+      updateQuest(q.id, { status: next });
+      schedulePush('quests', q.id);
+      renderSideQuests();
+    });
+  });
+
+  container.querySelectorAll('.quest-edit').forEach(btn => {
+    btn.addEventListener('click', () => openQuestModal(btn.dataset.id));
+  });
+
+  container.querySelectorAll('.quest-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      armDelete(btn, '&#x2715; DELETE', () => {
+        const q = quests.find(q => q.id === btn.dataset.id);
+        if (q?.notionId) archiveNotionProject(q.notionId).catch(err => console.error('Notion archive failed:', err));
+        deleteQuest(btn.dataset.id);
+        renderSideQuests();
+      });
+    });
+  });
+}
+
+function openQuestModal(id) {
+  const q = id ? quests.find(q => q.id === id) : null;
+  openModal({
+    title: q ? 'EDIT QUEST' : 'NEW QUEST',
+    submitLabel: q ? 'SAVE' : 'CREATE',
+    fields: [
+      { name: 'name',       label: 'NAME',        defaultValue: q?.name || '' },
+      { name: 'status',     label: 'STATUS',      type: 'select', options: SIDE_QUEST_STATUSES, defaultValue: q?.status || 'ONGOING' },
+      { name: 'date',       label: 'DATE',        type: 'date', required: false, defaultValue: q?.date || '' },
+      { name: 'schoolYear', label: 'SCHOOL YEAR', type: 'select', required: false, options: [{ value: '', label: '— None —' }, ...SCHOOL_YEARS], defaultValue: q?.schoolYear || '' },
+      { name: 'role',       label: 'ROLE',        required: false, defaultValue: q?.role || '' },
+      { name: 'category',   label: 'CATEGORY',    type: 'multi', required: false, options: SIDE_QUEST_CATEGORIES, defaultValue: q?.category || [] },
+      { name: 'outcome',    label: 'OUTCOME',     type: 'textarea', required: false, defaultValue: q?.outcome || '' },
+      { name: 'notes',      label: 'NOTES',       type: 'textarea', required: false, defaultValue: q?.notes || '' },
+      { name: 'link',       label: 'LINK',        type: 'url', required: false, defaultValue: q?.link || '' },
+    ],
+    onSubmit(data) {
+      if (q) {
+        updateQuest(id, data);
+        schedulePush('quests', id);
+      } else {
+        schedulePush('quests', createQuest(data).id);
+      }
+      renderSideQuests();
+    },
   });
 }
 
 // ============================================================
 // NOTION SYNC
+// Each view pushes edits on a debounce and pulls on demand.
 // ============================================================
-const syncState = {
-  assignments: { pending: new Set(), timer: null },
-  projects:    { pending: new Set(), timer: null },
-  coding:      { pending: new Set(), timer: null },
-  greek:       { pending: new Set(), timer: null },
+const SYNC_VIEWS = {
+  assignments: {
+    btn: 'btn-sync-notion',           lbl: 'sync-status',
+    list: () => tasks,                setList: setTasks,
+    fetchAll: fetchAllNotionTasks,    fromPage: fromNotionPage,
+    create: createNotionTask,         update: updateNotionTask,
+    idPrefix: 'task',                 render: () => renderAndRefreshDash(),
+  },
+  quests: {
+    btn: 'btn-sync-notion-quests',    lbl: 'sync-status-quests',
+    list: () => quests,               setList: setQuests,
+    fetchAll: fetchAllNotionProjects, fromPage: fromNotionProject,
+    create: createNotionProject,      update: updateNotionProject,
+    idPrefix: 'quest',                render: () => renderSideQuests(),
+  },
+  coding: {
+    btn: 'btn-sync-notion-coding',    lbl: 'sync-status-coding',
+    list: () => coding,               setList: setCoding,
+    fetchAll: fetchAllNotionCoding,   fromPage: fromNotionCoding,
+    create: createNotionCoding,       update: updateNotionCoding,
+    idPrefix: 'code',                 render: () => renderCoding(),
+  },
+  codingTasks: {
+    btn: 'btn-sync-notion-devtasks',      lbl: 'sync-status-devtasks',
+    list: () => codingTasks,              setList: setCodingTasks,
+    fetchAll: fetchAllNotionCodingTasks,  fromPage: fromNotionCodingTask,
+    create: createNotionCodingTask,       update: updateNotionCodingTask,
+    idPrefix: 'ctask',                    render: () => renderCoding(),
+  },
+  greek: {
+    btn: 'btn-sync-notion-greek',     lbl: 'sync-status-greek',
+    list: () => greek,                setList: setGreek,
+    fetchAll: fetchAllNotionTexts,    fromPage: fromNotionText,
+    create: createNotionText,         update: updateNotionText,
+    idPrefix: 'grk',                  render: () => renderGreekPortfolio(),
+  },
 };
 
-const SYNC_BTN_IDS = { assignments: 'btn-sync-notion', projects: 'btn-sync-notion-projects', coding: 'btn-sync-notion-coding', greek: 'btn-sync-notion-greek' };
-const SYNC_LBL_IDS = { assignments: 'sync-status',     projects: 'sync-status-projects',     coding: 'sync-status-coding',     greek: 'sync-status-greek' };
-function getSyncBtn(v) { return document.getElementById(SYNC_BTN_IDS[v]); }
-function getSyncLbl(v) { return document.getElementById(SYNC_LBL_IDS[v]); }
+const pendingPush = {};
+const pushTimers  = {};
 
 function schedulePush(viewKey, itemId) {
-  syncState[viewKey].pending.add(itemId);
-  clearTimeout(syncState[viewKey].timer);
-  syncState[viewKey].timer = setTimeout(() => flushPushForView(viewKey), 2000);
+  (pendingPush[viewKey] ??= new Set()).add(itemId);
+  clearTimeout(pushTimers[viewKey]);
+  pushTimers[viewKey] = setTimeout(() => flushPush(viewKey), 2000);
 }
 
-async function flushPushForView(viewKey) {
-  const btn = getSyncBtn(viewKey), lbl = getSyncLbl(viewKey);
-  if (viewKey === 'assignments') await flushPushAssignments(btn, lbl);
-  else if (viewKey === 'projects') await flushPushProjects(btn, lbl);
-  else if (viewKey === 'coding')   await flushPushCoding(btn, lbl);
-  else if (viewKey === 'greek')    await flushPushGreek(btn, lbl);
-}
-
-function setSyncStatus(state, btnEl, lblEl, msg = '') {
+function setSyncStatus(viewKey, state, msg = '') {
+  const btnEl = document.getElementById(SYNC_VIEWS[viewKey].btn);
+  const lblEl = document.getElementById(SYNC_VIEWS[viewKey].lbl);
   if (!btnEl || !lblEl) return;
   const states = {
-    idle:    { text: '⟳ SYNC NOTION', color: '#555', label: '' },
-    syncing: { text: '⟳ SYNCING…',    color: 'var(--accent)', label: 'WORKING…' },
-    success: { text: '⟳ SYNC NOTION', color: 'var(--status-done)', label: '✓ SYNCED' },
-    error:   { text: '⟳ SYNC NOTION', color: 'var(--status-blocked)', label: '✗ ' + msg },
+    idle:    { text: '⟳ SYNC NOTION', color: '#555',                   label: '' },
+    syncing: { text: '⟳ SYNCING…',    color: 'var(--accent)',          label: 'WORKING…' },
+    success: { text: '⟳ SYNC NOTION', color: 'var(--status-done)',     label: '✓ SYNCED' },
+    error:   { text: '⟳ SYNC NOTION', color: 'var(--status-blocked)',  label: '✗ ' + msg },
   };
   const s = states[state] || states.idle;
   btnEl.textContent       = s.text;
@@ -950,75 +1435,118 @@ function setSyncStatus(state, btnEl, lblEl, msg = '') {
   lblEl.style.color       = s.color;
 }
 
-async function flushPushAssignments(btnEl, lblEl) {
-  const state = syncState.assignments;
-  if (!state.pending.size) return;
-  const ids = [...state.pending];
-  state.pending.clear();
-  setSyncStatus('syncing', btnEl, lblEl);
+// Push everything edited since the last flush. Assignments also carry a page body.
+async function flushPush(viewKey) {
+  const cfg = SYNC_VIEWS[viewKey];
+  const ids = [...(pendingPush[viewKey] || [])];
+  if (!ids.length) return;
+  pendingPush[viewKey].clear();
+  clearTimeout(pushTimers[viewKey]);
+  setSyncStatus(viewKey, 'syncing');
   try {
     for (const id of ids) {
-      const t = tasks.find(t => t.id === id);
-      if (!t) continue;
-      if (t.notionId) {
-        await updateNotionTask(t.notionId, t);
-        if (t.body?.trim()) await updatePageBody(t.notionId, t.body).catch(err => console.error('Body push failed:', err));
+      const item = cfg.list().find(x => x.id === id);
+      if (!item) continue;
+      if (item.notionId) {
+        await cfg.update(item.notionId, item);
+        if (viewKey === 'assignments' && item.body?.trim()) {
+          await updatePageBody(item.notionId, item.body).catch(err => console.error('Body push failed:', err));
+        }
       } else {
-        const page = await createNotionTask(t);
+        const page = await cfg.create(item);
         if (page?.id) {
-          updateTask(t.id, { notionId: page.id });
-          if (t.body?.trim()) await updatePageBody(page.id, t.body).catch(err => console.error('Body push failed:', err));
+          cfg.setList(cfg.list().map(x => x.id === id ? { ...x, notionId: page.id } : x));
+          if (viewKey === 'assignments' && item.body?.trim()) {
+            await updatePageBody(page.id, item.body).catch(err => console.error('Body push failed:', err));
+          }
         }
       }
     }
-    setSyncStatus('success', btnEl, lblEl);
-    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
+    setSyncStatus(viewKey, 'success');
+    setTimeout(() => setSyncStatus(viewKey, 'idle'), 2000);
   } catch (err) {
-    console.error('Auto-sync failed:', err);
-    setSyncStatus('error', btnEl, lblEl, err.message);
+    console.error(`${viewKey} push failed:`, err);
+    setSyncStatus(viewKey, 'error', err.message);
   }
 }
 
-async function syncAssignmentsWithNotion() {
-  const btnEl = getSyncBtn('assignments'), lblEl = getSyncLbl('assignments');
-  setSyncStatus('syncing', btnEl, lblEl);
-
+// Pull from Notion and merge, last write wins. Pending local edits are pushed
+// first, otherwise a sync fired inside the 2s debounce would overwrite them.
+async function syncView(viewKey) {
+  const cfg = SYNC_VIEWS[viewKey];
+  await flushPush(viewKey);
+  setSyncStatus(viewKey, 'syncing');
   try {
-    // 1. Fetch all pages from Notion
-    const notionPages = await fetchAllNotionTasks();
-
-    // 2. Build lookup maps
+    const pages = await cfg.fetchAll();
     const localByNotionId = Object.fromEntries(
-      tasks.filter(t => t.notionId).map(t => [t.notionId, t])
+      cfg.list().filter(x => x.notionId).map(x => [x.notionId, x])
     );
-    const notionIdSet = new Set(notionPages.map(p => p.id));
+    let merged = [...cfg.list()];
 
-    let updated = [...tasks];
+    for (const page of pages) {
+      const remote = cfg.fromPage(page);
+      const local  = localByNotionId[page.id];
+      if (local) {
+        const remoteTime = new Date(remote.notionUpdatedAt);
+        const localTime  = new Date(local.notionUpdatedAt || 0);
+        if (remoteTime >= localTime) {
+          merged = merged.map(x => x.id === local.id ? { ...x, ...remote, id: x.id } : x);
+        } else {
+          await cfg.update(page.id, local);
+        }
+      } else {
+        merged = [...merged, { id: generateId(cfg.idPrefix), ...remote }];
+      }
+    }
 
-    // 3. Process each Notion page
-    for (const page of notionPages) {
+    // Anything created locally and never pushed
+    for (const item of merged.filter(x => !x.notionId)) {
+      const page = await cfg.create(item);
+      merged = merged.map(x => x.id === item.id ? { ...x, notionId: page.id } : x);
+    }
+
+    cfg.setList(merged);
+    setSyncStatus(viewKey, 'success');
+    setTimeout(() => setSyncStatus(viewKey, 'idle'), 3000);
+    cfg.render();
+  } catch (err) {
+    console.error(`${viewKey} sync failed:`, err);
+    setSyncStatus(viewKey, 'error', err.message);
+  }
+}
+
+const syncQuestsWithNotion      = () => syncView('quests');
+const syncCodingWithNotion      = () => syncView('coding');
+const syncCodingTasksWithNotion = () => syncView('codingTasks');
+const syncGreekWithNotion       = () => syncView('greek');
+
+// Assignments carry a page body and a done-task cutoff, so they get their own pull.
+async function syncAssignmentsWithNotion() {
+  await flushPush('assignments');
+  setSyncStatus('assignments', 'syncing');
+  try {
+    const pages = await fetchAllNotionTasks();
+    const localByNotionId = Object.fromEntries(tasks.filter(t => t.notionId).map(t => [t.notionId, t]));
+    let merged = [...tasks];
+
+    for (const page of pages) {
       const remote = fromNotionPage(page);
       const local  = localByNotionId[page.id];
 
       if (local) {
-        // Exists locally — last-write-wins on updatedAt
         const remoteTime = new Date(page.last_edited_time);
         const localTime  = new Date(local.updatedAt);
         if (remoteTime >= localTime) {
-          // Notion is newer (or equal): pull body (skip for DONE), update local
+          // Bodies are only worth fetching for work still in flight
           const body = remote.status !== 'DONE' ? await fetchPageBody(page.id) : (local.body || '');
-          updated = updated.map(t =>
-            t.id === local.id ? { ...t, ...remote, body, id: t.id, createdAt: t.createdAt } : t
-          );
+          merged = merged.map(t => t.id === local.id ? { ...t, ...remote, body, id: t.id, createdAt: t.createdAt } : t);
         } else {
-          // Local is newer: push properties and body to Notion
           await updateNotionTask(page.id, local);
           if (local.status !== 'DONE') await updatePageBody(page.id, local.body || '');
         }
       } else {
-        // New in Notion: pull properties and body (skip body for DONE)
         const body = remote.status !== 'DONE' ? await fetchPageBody(page.id) : '';
-        updated = [...updated, {
+        merged = [...merged, {
           id:        generateId('task'),
           createdAt: page.created_time,
           updatedAt: page.last_edited_time,
@@ -1028,742 +1556,26 @@ async function syncAssignmentsWithNotion() {
       }
     }
 
-    // 4. Push local tasks that have no notionId yet
-    const needsPush = updated.filter(t => !t.notionId);
-    for (const task of needsPush) {
+    for (const task of merged.filter(t => !t.notionId)) {
       const page = await createNotionTask(task);
-      updated = updated.map(t =>
-        t.id === task.id ? { ...t, notionId: page.id } : t
-      );
+      merged = merged.map(t => t.id === task.id ? { ...t, notionId: page.id } : t);
       if (task.body?.trim()) {
         await updatePageBody(page.id, task.body).catch(err => console.error('Body push failed:', err));
       }
     }
 
-    // 5. Drop DONE tasks older than 7 days, then commit and re-render
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    updated = updated.filter(t =>
-      t.status !== 'DONE' || new Date(t.updatedAt).getTime() >= cutoff
-    );
-    setTasks(updated);
-    setSyncStatus('success', btnEl, lblEl);
-    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
+    // Keep the local store from growing forever: drop DONE tasks after a week.
+    const cutoff = Date.now() - 7 * 86400000;
+    merged = merged.filter(t => t.status !== 'DONE' || new Date(t.updatedAt).getTime() >= cutoff);
+
+    setTasks(merged);
+    setSyncStatus('assignments', 'success');
+    setTimeout(() => setSyncStatus('assignments', 'idle'), 3000);
     renderAndRefreshDash();
   } catch (err) {
-    console.error('Notion sync failed:', err);
-    setSyncStatus('error', btnEl, lblEl, err.message);
+    console.error('Assignments sync failed:', err);
+    setSyncStatus('assignments', 'error', err.message);
   }
-}
-
-// ── Projects flush + sync ─────────────────────────────────────────────────
-
-async function flushPushProjects(btnEl, lblEl) {
-  const state = syncState.projects;
-  if (!state.pending.size) return;
-  const ids = [...state.pending];
-  state.pending.clear();
-  setSyncStatus('syncing', btnEl, lblEl);
-  try {
-    for (const id of ids) {
-      const p = projects.find(p => p.id === id);
-      if (!p) continue;
-      if (p.notionId) {
-        await updateNotionProject(p.notionId, p);
-      } else {
-        const page = await createNotionProject(p);
-        if (page?.id) updateProject(p.id, { notionId: page.id });
-      }
-    }
-    setSyncStatus('success', btnEl, lblEl);
-    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
-  } catch (err) {
-    console.error('Projects auto-sync failed:', err);
-    setSyncStatus('error', btnEl, lblEl, err.message);
-  }
-}
-
-async function syncProjectsWithNotion() {
-  const btnEl = getSyncBtn('projects'), lblEl = getSyncLbl('projects');
-  setSyncStatus('syncing', btnEl, lblEl);
-  try {
-    const notionPages = await fetchAllNotionProjects();
-    const localByNotionId = Object.fromEntries(
-      projects.filter(p => p.notionId).map(p => [p.notionId, p])
-    );
-    let updated = [...projects];
-
-    for (const page of notionPages) {
-      const remote = fromNotionProject(page);
-      const local  = localByNotionId[page.id];
-      if (local) {
-        const remoteTime = new Date(remote.notionUpdatedAt);
-        const localTime  = new Date(local.notionUpdatedAt || 0);
-        if (remoteTime >= localTime) {
-          updated = updated.map(p =>
-            p.id === local.id ? { ...p, ...remote, id: p.id, priority: p.priority } : p
-          );
-        } else {
-          await updateNotionProject(page.id, local);
-        }
-      } else {
-        updated = [...updated, {
-          id:       generateId('proj'),
-          priority: 'NORMAL',
-          ...remote,
-        }];
-      }
-    }
-
-    const needsPush = updated.filter(p => !p.notionId);
-    for (const proj of needsPush) {
-      const page = await createNotionProject(proj);
-      updated = updated.map(p => p.id === proj.id ? { ...p, notionId: page.id } : p);
-    }
-
-    updated.forEach(p => updateProject(p.id, p));
-    // Add truly new projects that don't exist yet
-    const existingIds = new Set(projects.map(p => p.id));
-    updated.filter(p => !existingIds.has(p.id)).forEach(p => createProject(p));
-
-    setSyncStatus('success', btnEl, lblEl);
-    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
-    renderPM();
-  } catch (err) {
-    console.error('Projects sync failed:', err);
-    setSyncStatus('error', btnEl, lblEl, err.message);
-  }
-}
-
-// ── Coding flush + sync ────────────────────────────────────────────────────
-
-async function flushPushCoding(btnEl, lblEl) {
-  const state = syncState.coding;
-  if (!state.pending.size) return;
-  const ids = [...state.pending];
-  state.pending.clear();
-  setSyncStatus('syncing', btnEl, lblEl);
-  try {
-    for (const id of ids) {
-      const c = coding.find(c => c.id === id);
-      if (!c) continue;
-      if (c.notionId) {
-        await updateNotionCoding(c.notionId, c);
-      } else {
-        const page = await createNotionCoding(c);
-        if (page?.id) updateCoding(c.id, { notionId: page.id });
-      }
-    }
-    setSyncStatus('success', btnEl, lblEl);
-    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
-  } catch (err) {
-    console.error('Coding auto-sync failed:', err);
-    setSyncStatus('error', btnEl, lblEl, err.message);
-  }
-}
-
-async function syncCodingWithNotion() {
-  const btnEl = getSyncBtn('coding'), lblEl = getSyncLbl('coding');
-  setSyncStatus('syncing', btnEl, lblEl);
-  try {
-    const notionPages = await fetchAllNotionCoding();
-    const localByNotionId = Object.fromEntries(
-      coding.filter(c => c.notionId).map(c => [c.notionId, c])
-    );
-    let updated = [...coding];
-
-    for (const page of notionPages) {
-      const remote = fromNotionCoding(page);
-      const local  = localByNotionId[page.id];
-      if (local) {
-        const remoteTime = new Date(remote.notionUpdatedAt);
-        const localTime  = new Date(local.notionUpdatedAt || 0);
-        if (remoteTime >= localTime) {
-          updated = updated.map(c =>
-            c.id === local.id ? { ...c, ...remote, id: c.id } : c
-          );
-        } else {
-          await updateNotionCoding(page.id, local);
-        }
-      } else {
-        updated = [...updated, {
-          id: generateId('code'),
-          ...remote,
-        }];
-      }
-    }
-
-    const needsPush = updated.filter(c => !c.notionId);
-    for (const proj of needsPush) {
-      const page = await createNotionCoding(proj);
-      updated = updated.map(c => c.id === proj.id ? { ...c, notionId: page.id } : c);
-    }
-
-    setCoding(updated);
-    setSyncStatus('success', btnEl, lblEl);
-    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
-    renderCoding();
-  } catch (err) {
-    console.error('Coding sync failed:', err);
-    setSyncStatus('error', btnEl, lblEl, err.message);
-  }
-}
-
-// ── Greek flush + sync ─────────────────────────────────────────────────────
-
-async function flushPushGreek(btnEl, lblEl) {
-  const state = syncState.greek;
-  if (!state.pending.size) return;
-  const ids = [...state.pending];
-  state.pending.clear();
-  setSyncStatus('syncing', btnEl, lblEl);
-  try {
-    for (const id of ids) {
-      const t = greek.texts.find(t => t.id === id);
-      if (!t) continue;
-      if (t.notionId) {
-        await updateNotionText(t.notionId, t);
-      } else {
-        const page = await createNotionText(t);
-        if (page?.id) {
-          const updatedTexts = greek.texts.map(tx =>
-            tx.id === id ? { ...tx, notionId: page.id } : tx
-          );
-          updateGreek({ texts: updatedTexts });
-        }
-      }
-    }
-    setSyncStatus('success', btnEl, lblEl);
-    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 2000);
-  } catch (err) {
-    console.error('Greek auto-sync failed:', err);
-    setSyncStatus('error', btnEl, lblEl, err.message);
-  }
-}
-
-async function syncGreekWithNotion() {
-  const btnEl = getSyncBtn('greek'), lblEl = getSyncLbl('greek');
-  setSyncStatus('syncing', btnEl, lblEl);
-  try {
-    const notionPages = await fetchAllNotionTexts();
-    const localByNotionId = Object.fromEntries(
-      greek.texts.filter(t => t.notionId).map(t => [t.notionId, t])
-    );
-    let updatedTexts = [...greek.texts];
-
-    for (const page of notionPages) {
-      const remote = fromNotionText(page);
-      const local  = localByNotionId[page.id];
-      if (local) {
-        const remoteTime = new Date(remote.notionUpdatedAt);
-        const localTime  = new Date(local.notionUpdatedAt || 0);
-        if (remoteTime >= localTime) {
-          updatedTexts = updatedTexts.map(t =>
-            t.id === local.id ? { ...t, title: remote.title, status: remote.status, notionId: remote.notionId, notionUpdatedAt: remote.notionUpdatedAt } : t
-          );
-        } else {
-          await updateNotionText(page.id, local);
-        }
-      } else {
-        updatedTexts = [...updatedTexts, {
-          id:        generateId('grk'),
-          wordCount: 0,
-          notes:     '',
-          ...remote,
-        }];
-      }
-    }
-
-    const needsPush = updatedTexts.filter(t => !t.notionId);
-    for (const text of needsPush) {
-      const page = await createNotionText(text);
-      updatedTexts = updatedTexts.map(t =>
-        t.id === text.id ? { ...t, notionId: page.id } : t
-      );
-    }
-
-    updateGreek({ texts: updatedTexts });
-    setSyncStatus('success', btnEl, lblEl);
-    setTimeout(() => setSyncStatus('idle', btnEl, lblEl), 3000);
-    renderGreekPortfolio();
-  } catch (err) {
-    console.error('Greek sync failed:', err);
-    setSyncStatus('error', btnEl, lblEl, err.message);
-  }
-}
-
-// ============================================================
-// DEV PM VIEW
-// ============================================================
-const PM_STATUS_CYCLE = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
-const PM_BOARD_COLS   = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
-const PROJ_STATUS_ORDER = { ACTIVE: 0, PAUSED: 1, DONE: 2 };
-let pmSubView    = 'projects';
-let pmTicketMode = 'table';
-let pmFilterAssignee = '', pmFilterPriority = '', pmFilterStatus = '';
-let projFilterStatus = '', projSortField = 'status', projSortDir = 'asc';
-
-function renderPM() {
-  const container = document.querySelector('main [data-view="projects"]');
-  if (!container) return;
-
-  const activeId = getPMActiveProject();
-  const proj = projects.find(p => p.id === activeId);
-
-  container.innerHTML = `
-    <div class="view-toolbar" style="margin-bottom:0">
-      <div class="view-toggle">
-        <button class="toggle-btn pm-tab ${pmSubView === 'projects' ? 'view-active' : ''}" data-tab="projects">PROJECTS</button>
-        <button class="toggle-btn pm-tab ${pmSubView === 'tickets' ? 'view-active' : ''}" data-tab="tickets">TICKETS</button>
-        <button class="toggle-btn pm-tab ${pmSubView === 'team' ? 'view-active' : ''}" data-tab="team">TEAM</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:var(--spacing-sm);margin-left:auto">
-        ${proj ? `<span class="mono-label sync-label">ACTIVE: <span style="color:var(--accent)">${esc(proj.name)}</span></span>` : ''}
-        <button id="btn-pm-new" class="action-btn">+ NEW ${pmSubView === 'projects' ? 'PROJECT' : pmSubView === 'tickets' ? 'TICKET' : 'MEMBER'}</button>
-      </div>
-    </div>
-    <div id="pm-content" style="margin-top:var(--spacing-md)"></div>`;
-
-  container.querySelectorAll('.pm-tab').forEach(btn => {
-    btn.addEventListener('click', () => { pmSubView = btn.dataset.tab; renderPM(); });
-  });
-
-  document.getElementById('btn-pm-new').addEventListener('click', () => {
-    if (pmSubView === 'projects') openNewPMProjectModal();
-    else if (pmSubView === 'tickets') openNewPMTicketModal();
-    else openNewPMMemberModal();
-  });
-
-  const content = document.getElementById('pm-content');
-  if (pmSubView === 'projects') renderPMProjects(content);
-  else if (pmSubView === 'tickets') renderPMTickets(content);
-  else renderPMTeam(content);
-}
-
-// PM PROJECTS
-function filteredSortedProjects(allTickets) {
-  let list = [...projects];
-  if (projFilterStatus) list = list.filter(p => p.status === projFilterStatus);
-  list.sort((a, b) => {
-    let va, vb;
-    if (projSortField === 'status') {
-      va = PROJ_STATUS_ORDER[a.status] ?? 99;
-      vb = PROJ_STATUS_ORDER[b.status] ?? 99;
-    } else if (projSortField === 'open') {
-      va = allTickets.filter(t => t.projectId === a.id && t.status !== 'DONE').length;
-      vb = allTickets.filter(t => t.projectId === b.id && t.status !== 'DONE').length;
-    } else {
-      va = (a[projSortField] || '').toLowerCase();
-      vb = (b[projSortField] || '').toLowerCase();
-    }
-    if (va < vb) return projSortDir === 'asc' ? -1 : 1;
-    if (va > vb) return projSortDir === 'asc' ? 1 : -1;
-    return 0;
-  });
-  return list;
-}
-
-function renderPMProjects(container) {
-  const allTickets  = getPMTickets();
-  const activeId    = getPMActiveProject();
-  const statusColor = { ACTIVE: 'var(--accent)', PAUSED: '#555', DONE: 'var(--status-done)' };
-  const projList    = filteredSortedProjects(allTickets);
-
-  container.innerHTML = `
-    <div class="view-toolbar" style="margin-bottom:var(--spacing-md)">
-      <div class="filter-bar">
-        <select id="proj-filter-status" class="filter-select">
-          <option value="">ALL STATUS</option>
-          ${SIDE_QUEST_STATUSES.map(s => `<option value="${s}" ${projFilterStatus === s ? 'selected' : ''}>${s}</option>`).join('')}
-        </select>
-        <select id="proj-sort-field" class="filter-select">
-          <option value="status">SORT: STATUS</option>
-          <option value="name">SORT: NAME</option>
-          <option value="open">SORT: OPEN TICKETS</option>
-        </select>
-        <select id="proj-sort-dir" class="filter-select">
-          <option value="asc">ASC ↑</option>
-          <option value="desc">DESC ↓</option>
-        </select>
-      </div>
-      <button id="btn-sync-notion-projects" class="action-btn ghost">⟳ SYNC NOTION</button>
-      <span id="sync-status-projects" class="mono-label sync-label"></span>
-    </div>
-    <div class="project-grid">
-      ${projList.map(p => {
-        const tickets  = allTickets.filter(t => t.projectId === p.id);
-        const open     = tickets.filter(t => t.status !== 'DONE').length;
-        const isActive = p.id === activeId;
-        const updated  = tickets.reduce((l, t) => t.updatedAt > l ? t.updatedAt : l, p.createdAt || new Date().toISOString());
-        const tags     = [...(p._notionCategory || []), ...(p._notionBusiness || [])];
-        return `<div class="project-card ${isActive ? 'project-active' : ''}" data-id="${p.id}">
-          <div class="project-phase-bar">
-            <span class="mono-label" style="color:${statusColor[p.status] || '#555'}">● ${p.status || 'PAUSED'}</span>
-            ${p._notionLink ? `<a href="${esc(p._notionLink)}" target="_blank" rel="noopener" class="edit-btn" style="text-decoration:none;margin-left:auto" title="Open in Notion">↗</a>` : ''}
-          </div>
-          <div class="project-name display-text">${esc(p.name)}</div>
-          ${tags.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${tags.map(t => `<span class="due-chip">${esc(t)}</span>`).join('')}</div>` : ''}
-          ${p.lastAction ? `<div class="project-desc"><span class="mono-label" style="color:#555">LAST: </span>${esc(p.lastAction)}</div>` : ''}
-          ${p.nextStep   ? `<div class="project-desc"><span class="mono-label" style="color:#555">NEXT: </span>${esc(p.nextStep)}</div>` : ''}
-          <div class="project-meta">
-            <div class="project-stats">
-              <span class="mono-label">${open} OPEN</span>
-              <span class="mono-label" style="color:#444">/ ${tickets.length} TOTAL</span>
-            </div>
-            <span class="mono-label" style="color:#444">${timeAgo(updated)}</span>
-          </div>
-          <div class="project-card-actions">
-            <button class="set-active-btn mono-label pm-set-active" data-id="${p.id}">
-              ${isActive ? '&#x2713; ACTIVE' : 'SET ACTIVE &#x2192;'}
-            </button>
-            <div class="project-action-btns">
-              <button class="edit-btn pm-edit-proj" data-id="${p.id}">&#x270E; EDIT</button>
-              <button class="edit-btn pm-del-proj" data-id="${p.id}" data-count="${tickets.length}">&#x2715; DELETE</button>
-            </div>
-          </div>
-        </div>`;
-      }).join('') || '<div class="empty-state" style="grid-column:1/-1">No projects match the current filters.</div>'}
-    </div>`;
-
-  // Sync filter/sort dropdowns to current state
-  const projFilterStatusEl = document.getElementById('proj-filter-status');
-  const projSortFieldEl    = document.getElementById('proj-sort-field');
-  const projSortDirEl      = document.getElementById('proj-sort-dir');
-  if (projFilterStatusEl) projFilterStatusEl.value = projFilterStatus;
-  if (projSortFieldEl)    projSortFieldEl.value    = projSortField;
-  if (projSortDirEl)      projSortDirEl.value      = projSortDir;
-
-  projFilterStatusEl.addEventListener('change', e => { projFilterStatus = e.target.value; renderPM(); });
-  projSortFieldEl.addEventListener('change',    e => { projSortField    = e.target.value; renderPM(); });
-  projSortDirEl.addEventListener('change',      e => { projSortDir      = e.target.value; renderPM(); });
-
-  document.getElementById('btn-sync-notion-projects').addEventListener('click', syncProjectsWithNotion);
-
-  container.querySelectorAll('.pm-set-active').forEach(btn => {
-    btn.addEventListener('click', e => { e.stopPropagation(); setPMActiveProject(btn.dataset.id); renderPM(); });
-  });
-  container.querySelectorAll('.project-card').forEach(card => {
-    card.addEventListener('click', () => { setPMActiveProject(card.dataset.id); pmSubView = 'tickets'; renderPM(); });
-  });
-  container.querySelectorAll('.pm-edit-proj').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const p = projects.find(p => p.id === btn.dataset.id);
-      if (!p) return;
-      openModal({
-        title: 'EDIT PROJECT', submitLabel: 'SAVE',
-        fields: [
-          { name: 'name',       label: 'PROJECT NAME', defaultValue: p.name },
-          { name: 'status',     label: 'STATUS', type: 'select', defaultValue: p.status, options: SIDE_QUEST_STATUSES },
-          { name: 'lastAction', label: 'LAST ACTION', required: false, defaultValue: p.lastAction || '' },
-          { name: 'nextStep',   label: 'NEXT STEP', required: false, defaultValue: p.nextStep || '' },
-        ],
-        onSubmit(data) {
-          updateProject(btn.dataset.id, data);
-          schedulePush('projects', btn.dataset.id);
-          renderPM();
-        },
-      });
-    });
-  });
-  container.querySelectorAll('.pm-del-proj').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      if (btn.dataset.confirm) {
-        const id = btn.dataset.id;
-        const p = projects.find(p => p.id === id);
-        if (p?.notionId) archiveNotionProject(p.notionId).catch(err => console.error('Notion archive failed:', err));
-        deleteProject(id);
-        if (getPMActiveProject() === id) {
-          const remaining = projects.filter(p => p.id !== id);
-          setPMActiveProject(remaining[0]?.id ?? null);
-        }
-        renderPM();
-      } else {
-        btn.dataset.confirm = '1';
-        const n = btn.dataset.count;
-        btn.textContent = `DELETE (${n} ticket${n == 1 ? '' : 's'})?`;
-        btn.style.color = 'var(--status-blocked)';
-        setTimeout(() => { if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715; DELETE'; btn.style.color = ''; } }, 3000);
-      }
-    });
-  });
-}
-
-function openNewPMProjectModal() {
-  openModal({
-    title: 'NEW PROJECT',
-    fields: [
-      { name: 'name',       label: 'PROJECT NAME' },
-      { name: 'status',     label: 'STATUS', type: 'select', options: SIDE_QUEST_STATUSES },
-      { name: 'lastAction', label: 'LAST ACTION', required: false },
-      { name: 'nextStep',   label: 'NEXT STEP', required: false },
-    ],
-    onSubmit(data) {
-      const result = createProject(data);
-      schedulePush('projects', result.id);
-      renderPM();
-    },
-  });
-}
-
-// PM TICKETS
-function renderPMTickets(container) {
-  const activeId = getPMActiveProject();
-  let tickets = getPMTickets().filter(t => t.projectId === activeId);
-  if (pmFilterAssignee) tickets = tickets.filter(t => t.assignee === pmFilterAssignee);
-  if (pmFilterPriority) tickets = tickets.filter(t => t.priority === pmFilterPriority);
-  if (pmFilterStatus)   tickets = tickets.filter(t => t.status === pmFilterStatus);
-
-  const team = getPMTeam();
-
-  container.innerHTML = `
-    <div class="view-toolbar" style="margin-bottom:var(--spacing-md)">
-      <div class="view-toggle">
-        <button id="pm-btn-table" class="toggle-btn ${pmTicketMode === 'table' ? 'view-active' : ''}">TABLE</button>
-        <button id="pm-btn-board" class="toggle-btn ${pmTicketMode === 'board' ? 'view-active' : ''}">BOARD</button>
-      </div>
-      <div class="filter-bar">
-        <select id="pm-filter-assignee" class="filter-select">
-          <option value="">ALL ASSIGNEES</option>
-          ${team.map(m => `<option value="${esc(m.name)}" ${pmFilterAssignee === m.name ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
-        </select>
-        <select id="pm-filter-priority" class="filter-select">
-          <option value="">ALL PRIORITIES</option>
-          ${['CRITICAL','HIGH','NORMAL','LOW'].map(p => `<option value="${p}" ${pmFilterPriority === p ? 'selected' : ''}>${p}</option>`).join('')}
-        </select>
-        <select id="pm-filter-status" class="filter-select">
-          <option value="">ALL STATUSES</option>
-          ${['TODO','IN_PROGRESS','REVIEW','DONE','BLOCKED'].map(s => `<option value="${s}" ${pmFilterStatus === s ? 'selected' : ''}>${fmtStatus(s)}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div id="pm-ticket-table" class="task-list" ${pmTicketMode === 'board' ? 'style="display:none"' : ''}></div>
-    <div id="pm-ticket-board" class="board-container board-5col" ${pmTicketMode === 'table' ? 'style="display:none"' : ''}></div>`;
-
-  document.getElementById('pm-btn-table').addEventListener('click', () => { pmTicketMode = 'table'; renderPM(); });
-  document.getElementById('pm-btn-board').addEventListener('click', () => { pmTicketMode = 'board'; renderPM(); });
-  document.getElementById('pm-filter-assignee').addEventListener('change', e => { pmFilterAssignee = e.target.value; renderPM(); });
-  document.getElementById('pm-filter-priority').addEventListener('change', e => { pmFilterPriority = e.target.value; renderPM(); });
-  document.getElementById('pm-filter-status').addEventListener('change', e => { pmFilterStatus = e.target.value; renderPM(); });
-
-  if (pmTicketMode === 'table') {
-    renderPMTicketTable(tickets, document.getElementById('pm-ticket-table'));
-  } else {
-    renderPMTicketBoard(tickets, document.getElementById('pm-ticket-board'));
-  }
-}
-
-function renderPMTicketTable(tickets, el) {
-  const cols = '1fr 120px 80px 100px 72px';
-  el.innerHTML = `
-    <div class="task-row table-header" style="grid-template-columns:${cols}">
-      <div class="mono-label">TITLE</div>
-      <div class="mono-label">ASSIGNEE</div>
-      <div class="mono-label">PRIORITY</div>
-      <div class="mono-label" style="text-align:right">STATUS</div>
-      <div></div>
-    </div>
-    ${tickets.length ? tickets.map(t => `
-      <div class="task-row ticket-row" style="grid-template-columns:${cols}">
-        <div class="task-title">
-          ${esc(t.title)}
-          ${t.dueDate ? `<span class="due-chip">DUE ${fmtDate(t.dueDate)}</span>` : ''}
-        </div>
-        <div class="task-assignee">${esc(t.assignee || '—')}</div>
-        <div class="priority-badge p-${t.priority}">${t.priority}</div>
-        <div class="status-badge s-${t.status} clickable-pm-status" data-id="${t.id}" title="Click to cycle status">${fmtStatus(t.status)}</div>
-        <div class="ticket-actions">
-          <button class="edit-btn pm-edit-ticket" data-id="${t.id}" title="Edit">&#x270E;</button>
-          <button class="edit-btn pm-del-ticket" data-id="${t.id}" title="Delete">&#x2715;</button>
-        </div>
-      </div>`).join('')
-    : '<div class="empty-state">No tickets match the current filters.</div>'}`;
-
-  el.querySelectorAll('.clickable-pm-status').forEach(badge => {
-    badge.addEventListener('click', e => {
-      e.stopPropagation();
-      const t = getPMTickets().find(t => t.id === badge.dataset.id);
-      if (!t) return;
-      const next = PM_STATUS_CYCLE[(PM_STATUS_CYCLE.indexOf(t.status) + 1) % PM_STATUS_CYCLE.length];
-      updatePMTicket(badge.dataset.id, { status: next });
-      renderPM();
-    });
-  });
-  el.querySelectorAll('.pm-edit-ticket').forEach(btn => {
-    btn.addEventListener('click', e => { e.stopPropagation(); openEditPMTicketModal(btn.dataset.id); });
-  });
-  el.querySelectorAll('.pm-del-ticket').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      if (btn.dataset.confirm) {
-        deletePMTicket(btn.dataset.id);
-        renderPM();
-      } else {
-        btn.dataset.confirm = '1';
-        btn.textContent = 'SURE?';
-        btn.style.color = 'var(--status-blocked)';
-        setTimeout(() => { if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; } }, 3000);
-      }
-    });
-  });
-}
-
-function renderPMTicketBoard(tickets, el) {
-  el.innerHTML = PM_BOARD_COLS.map(col => {
-    const colTickets = col === 'TODO'
-      ? tickets.filter(t => t.status === col || t.status === 'BLOCKED')
-      : tickets.filter(t => t.status === col);
-    return `<div class="board-col">
-      <div class="board-col-header">
-        <span class="status-badge s-${col}">${fmtStatus(col)}</span>
-        <span class="mono-label board-col-count">${colTickets.length}</span>
-      </div>
-      <div class="board-col-cards pm-drop-zone" data-col="${col}">
-        ${colTickets.map(t => `
-          <div class="board-card s-border-${t.status}" draggable="true" data-id="${t.id}">
-            <div class="card-title-row">
-              <div class="card-title">${esc(t.title)}</div>
-              <button class="edit-btn pm-card-edit" data-id="${t.id}" title="Edit">&#x270E;</button>
-            </div>
-            ${t.description ? `<div class="card-desc">${esc(t.description.length > 60 ? t.description.slice(0, 60) + '\u2026' : t.description)}</div>` : ''}
-            <div class="card-meta">
-              <span class="priority-badge p-${t.priority}">${t.priority}</span>
-              <span class="card-assignee">${esc(t.assignee || '—')}</span>
-            </div>
-            ${t.dueDate ? `<div class="due-chip" style="margin-top:6px">DUE ${fmtDate(t.dueDate)}</div>` : ''}
-            ${t.status === 'BLOCKED' ? '<div class="card-blocked-badge">BLOCKED</div>' : ''}
-          </div>`).join('')}
-      </div>
-    </div>`;
-  }).join('');
-
-  el.querySelectorAll('.board-card[draggable]').forEach(card => {
-    card.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', card.dataset.id); card.classList.add('dragging'); });
-    card.addEventListener('dragend', () => card.classList.remove('dragging'));
-  });
-  el.querySelectorAll('.pm-drop-zone').forEach(zone => {
-    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-    zone.addEventListener('drop', e => {
-      e.preventDefault();
-      zone.classList.remove('drag-over');
-      const id = e.dataTransfer.getData('text/plain');
-      updatePMTicket(id, { status: zone.dataset.col });
-      renderPM();
-    });
-  });
-  el.querySelectorAll('.pm-card-edit').forEach(btn => {
-    btn.addEventListener('click', e => { e.stopPropagation(); openEditPMTicketModal(btn.dataset.id); });
-  });
-}
-
-function openNewPMTicketModal() {
-  const team = getPMTeam();
-  openModal({
-    title: 'NEW TICKET',
-    fields: [
-      { name: 'title',       label: 'TITLE' },
-      { name: 'assignee',    label: 'ASSIGNEE', type: 'select', required: false,
-        options: [{ value: '', label: '— None —' }, ...team.map(m => ({ value: m.name, label: m.name }))] },
-      { name: 'priority',    label: 'PRIORITY', type: 'select', options: ['CRITICAL', 'HIGH', 'NORMAL', 'LOW'] },
-      { name: 'status',      label: 'STATUS', type: 'select', options: ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'] },
-      { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false },
-      { name: 'dueDate',     label: 'DUE DATE', type: 'date', required: false },
-    ],
-    onSubmit(data) { createPMTicket({ ...data, projectId: getPMActiveProject() }); renderPM(); },
-  });
-}
-
-function openEditPMTicketModal(id) {
-  const t = getPMTickets().find(t => t.id === id);
-  if (!t) return;
-  const team = getPMTeam();
-  openModal({
-    title: 'EDIT TICKET', submitLabel: 'SAVE',
-    fields: [
-      { name: 'title',       label: 'TITLE', defaultValue: t.title },
-      { name: 'assignee',    label: 'ASSIGNEE', type: 'select', required: false, defaultValue: t.assignee,
-        options: [{ value: '', label: '— None —' }, ...team.map(m => ({ value: m.name, label: m.name }))] },
-      { name: 'priority',    label: 'PRIORITY', type: 'select', defaultValue: t.priority, options: ['CRITICAL', 'HIGH', 'NORMAL', 'LOW'] },
-      { name: 'status',      label: 'STATUS', type: 'select', defaultValue: t.status, options: ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'] },
-      { name: 'description', label: 'DESCRIPTION', type: 'textarea', required: false, defaultValue: t.description || '' },
-      { name: 'dueDate',     label: 'DUE DATE', type: 'date', required: false, defaultValue: t.dueDate || '' },
-    ],
-    onSubmit(data) { updatePMTicket(id, data); renderPM(); },
-  });
-}
-
-// PM TEAM
-function renderPMTeam(container) {
-  const team      = getPMTeam();
-  const activeId  = getPMActiveProject();
-  const tickets   = getPMTickets().filter(t => t.projectId === activeId);
-
-  container.innerHTML = `
-    <div class="section-header display-text" style="font-size:32px;margin-bottom:var(--spacing-md)">TEAM</div>
-    <div class="team-list">
-      ${team.map(m => {
-        const myTickets = tickets.filter(t => t.assignee === m.name);
-        const open      = myTickets.filter(t => t.status !== 'DONE').length;
-        const blocked   = myTickets.filter(t => t.status === 'BLOCKED').length;
-        return `<div class="team-row ${blocked > 0 ? 'has-blocked' : ''}">
-          <div class="member-circle-lg ${blocked > 0 ? 'has-blocked' : ''}">${esc(m.initials)}</div>
-          <div class="member-info">
-            <div class="member-name">${esc(m.name)}</div>
-            <div class="member-role mono-label">${esc(m.role)}</div>
-          </div>
-          <div class="member-stats">
-            <span class="mono-label">${open} OPEN</span>
-            ${blocked > 0 ? `<span class="status-badge s-BLOCKED">${blocked} BLOCKED</span>` : ''}
-          </div>
-          <div class="member-actions">
-            <button class="edit-btn pm-edit-member" data-id="${m.id}" title="Edit">&#x270E;</button>
-            <button class="delete-member-btn pm-del-member" data-id="${m.id}" title="Remove">&#x2715;</button>
-          </div>
-        </div>`;
-      }).join('') || '<div class="empty-state">No team members yet.</div>'}
-    </div>`;
-
-  container.querySelectorAll('.pm-edit-member').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const m = getPMTeam().find(m => m.id === btn.dataset.id);
-      if (!m) return;
-      openModal({
-        title: 'EDIT MEMBER', submitLabel: 'SAVE',
-        fields: [
-          { name: 'name',     label: 'FULL NAME', defaultValue: m.name },
-          { name: 'initials', label: 'INITIALS (2 chars)', defaultValue: m.initials },
-          { name: 'role',     label: 'ROLE', type: 'select', defaultValue: m.role, options: ['Frontend', 'Backend', 'Design', 'DevOps', 'PM'] },
-        ],
-        onSubmit(data) { updatePMMember(btn.dataset.id, data); renderPM(); },
-      });
-    });
-  });
-  container.querySelectorAll('.pm-del-member').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (btn.dataset.confirm) {
-        deletePMMember(btn.dataset.id);
-        renderPM();
-      } else {
-        btn.dataset.confirm = '1';
-        btn.textContent = 'SURE?';
-        btn.style.color = 'var(--status-blocked)';
-        setTimeout(() => { if (btn.dataset.confirm) { btn.dataset.confirm = ''; btn.innerHTML = '&#x2715;'; btn.style.color = ''; } }, 3000);
-      }
-    });
-  });
-}
-
-function openNewPMMemberModal() {
-  openModal({
-    title: 'NEW MEMBER',
-    fields: [
-      { name: 'name',     label: 'FULL NAME' },
-      { name: 'initials', label: 'INITIALS (2 chars)' },
-      { name: 'role',     label: 'ROLE', type: 'select', options: ['Frontend', 'Backend', 'Design', 'DevOps', 'PM'] },
-    ],
-    onSubmit(data) { createPMMember(data); renderPM(); },
-  });
 }
 
 // ============================================================
@@ -1772,17 +1584,23 @@ function openNewPMMemberModal() {
 initModal();
 initAssignments();
 
-if (projects.length === 0)    syncProjectsWithNotion();
-if (coding.length === 0)      syncCodingWithNotion();
-if (greek.texts.length === 0) syncGreekWithNotion();
+// Coding projects load first so dev tasks can resolve their project relation.
+if (coding.length === 0) {
+  syncCodingWithNotion().then(() => {
+    if (codingTasks.length === 0) syncCodingTasksWithNotion();
+  });
+} else if (codingTasks.length === 0) {
+  syncCodingTasksWithNotion();
+}
+if (quests.length === 0) syncQuestsWithNotion();
+if (greek.length === 0)  syncGreekWithNotion();
 
 registerView('dashboard',       renderDashboard);
 registerView('assignments',     renderAssignments);
 registerView('coding',          renderCoding);
 registerView('greek-portfolio', renderGreekPortfolio);
-registerView('projects',        renderPM);
+registerView('side-quests',     renderSideQuests);
 
-// Nav click handlers
 document.querySelectorAll('.nav-item[data-view]').forEach(item => {
   item.addEventListener('click', () => navigateTo(item.dataset.view));
 });
@@ -1795,7 +1613,7 @@ document.getElementById('meta-date').textContent =
 // Sidebar exam countdown
 const examCountdownEl = document.getElementById('sidebar-countdown-num');
 if (examCountdownEl) {
-  const examDays = Math.ceil((new Date('2026-05-05') - new Date()) / 86400000);
+  const examDays = Math.ceil((new Date(EXAM_DATE) - new Date()) / 86400000);
   examCountdownEl.textContent = examDays >= 0 ? `T-${examDays}` : 'DONE';
 }
 

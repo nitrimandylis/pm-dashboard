@@ -642,16 +642,11 @@ main [data-view] {
   width: max-content;
 }
 
+/* One status vocabulary across assignments, dev tasks and the Greek portfolio */
 .s-TODO        { color: var(--status-todo); }
 .s-IN_PROGRESS { color: var(--status-in-progress); }
-.s-REVIEW      { color: var(--status-review); }
 .s-DONE        { color: var(--status-done); }
 .s-BLOCKED     { color: var(--status-blocked); }
-
-/* Greek text statuses */
-.s-greek-DRAFT   { color: var(--status-todo); }
-.s-greek-REVISED { color: var(--status-review); }
-.s-greek-FINAL   { color: var(--status-done); }
 
 .clickable-status {
   cursor: pointer;
@@ -710,6 +705,8 @@ main [data-view] {
 }
 .due-chip:first-child { margin-left: 0; }
 .chip-danger { color: var(--status-blocked); border-color: var(--status-blocked); }
+.chip-link { color: var(--ink-2); text-decoration: none; }
+.chip-link:hover { color: var(--accent); border-color: var(--accent); }
 
 /* Subject badges — match Notion Assignments DB */
 .subject-badge {
@@ -726,9 +723,10 @@ main [data-view] {
 .subj-math-aa-hl         { background: #2D4A8A; color: #fff; }
 .subj-english-b-hl       { background: #4A2D8A; color: #fff; }
 .subj-business-sl        { background: #8A6A2D; color: #fff; }
-.subj-modern-greek-sl    { background: #2D8A4A; color: #fff; }
+.subj-modern-greek-a-sl  { background: #2D8A4A; color: #fff; }
 .subj-global-politics-sl { background: #8A4A2D; color: #fff; }
 .subj-tok                { background: #555;    color: #fff; }
+.subj-math-extra         { background: #6B2D4A; color: #fff; }
 .subj-other              { background: #333;    color: #999; }
 
 /* ============================================================
@@ -740,9 +738,6 @@ main [data-view] {
   gap: var(--spacing-sm);
   align-items: start;
 }
-
-/* 5-column board for assignments / PM tickets */
-.board-5col { grid-template-columns: repeat(5, 1fr) !important; }
 
 .board-col {
   background: var(--bg-2);
@@ -793,7 +788,6 @@ main [data-view] {
 
 .s-border-TODO        { border-left-color: var(--status-todo); }
 .s-border-IN_PROGRESS { border-left-color: var(--status-in-progress); }
-.s-border-REVIEW      { border-left-color: var(--status-review); }
 .s-border-DONE        { border-left-color: var(--status-done); }
 .s-border-BLOCKED     { border-left-color: var(--status-blocked); }
 
@@ -839,156 +833,15 @@ main [data-view] {
 }
 
 /* ============================================================
-   EE TRACKER
-   ============================================================ */
-.ee-layout {
-  display: grid;
-  grid-template-columns: 380px 1fr;
-  gap: var(--spacing-md);
-  align-items: start;
-}
-
-.ee-left {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-md);
-}
-
-.ee-percent {
-  font-size: 96px;
-  color: var(--accent);
-  margin: var(--spacing-sm) 0;
-}
-.ee-percent span { font-size: 32px; color: var(--ink-3); }
-
-.progress-track {
-  height: 12px;
-  background: #000;
-  border: 1px solid var(--line-2);
-}
-.progress-fill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.3s ease;
-}
-
-.ee-wc-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--spacing-sm);
-  margin-top: var(--spacing-sm);
-  color: var(--ink-3);
-}
-
-.ee-wc-input {
-  width: 130px;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid var(--line-2);
-  color: var(--ink-1);
-  font-family: var(--font-display);
-  font-size: 28px;
-  padding: 2px 0;
-  outline: none;
-  -webkit-appearance: none;
-  appearance: none;
-  border-radius: 0;
-}
-.ee-wc-input:focus { border-bottom-color: var(--accent); }
-
-/* Milestone timeline */
-.ee-timeline { display: flex; flex-direction: column; }
-
-.ee-milestone {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: 11px 4px;
-  border-bottom: 1px solid var(--line-1);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.ee-milestone:hover { background: rgba(255, 255, 255, 0.025); }
-
-.ee-milestone-num {
-  font-size: 20px;
-  color: var(--ink-3);
-  width: 34px;
-  flex-shrink: 0;
-}
-.ee-milestone.is-done .ee-milestone-num { color: var(--status-done); }
-
-.ee-milestone-label { font-weight: 600; }
-.ee-milestone.is-done .ee-milestone-label {
-  text-decoration: line-through;
-  color: var(--ink-3);
-}
-
-.ee-milestone-check {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--line-3);
-  background: transparent;
-  cursor: pointer;
-  flex-shrink: 0;
-  display: grid;
-  place-content: center;
-  transition: background 0.1s, border-color 0.1s;
-}
-.ee-milestone-check:checked {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-.ee-milestone-check:checked::after {
-  content: '\2713';
-  color: var(--accent-ink);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-/* Meeting log */
-.ee-meeting-list { display: flex; flex-direction: column; }
-
-.ee-meeting {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--spacing-sm);
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line-1);
-}
-.ee-meeting .due-chip { flex-shrink: 0; margin-top: 2px; }
-.ee-meeting-notes { font-size: 13px; color: var(--ink-2); }
-
-/* ============================================================
    GREEK PORTFOLIO
    ============================================================ */
 .greek-top {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: 1fr 1fr;
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-md);
   align-items: stretch;
 }
-
-.issue-input {
-  width: 100%;
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  color: var(--ink-1);
-  font-family: var(--font-body);
-  font-size: 15px;
-  line-height: 1.5;
-  padding: var(--spacing-sm);
-  outline: none;
-  resize: vertical;
-  min-height: 84px;
-  margin-top: 8px;
-  border-radius: 0;
-}
-.issue-input:focus { border-color: var(--accent); }
 
 .greek-progress-num {
   font-size: 64px;
@@ -996,17 +849,6 @@ main [data-view] {
   margin: 8px 0;
 }
 .greek-progress-num span { font-size: 24px; color: var(--ink-3); }
-
-.greek-segments { display: flex; gap: 6px; }
-.greek-seg {
-  flex: 1;
-  height: 14px;
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-}
-.greek-seg.seg-DRAFT   { background: var(--line-2); }
-.greek-seg.seg-REVISED { background: var(--status-review); border-color: var(--status-review); }
-.greek-seg.seg-FINAL   { background: var(--status-done); border-color: var(--status-done); }
 
 .greek-grid {
   display: grid;
@@ -1024,9 +866,9 @@ main [data-view] {
   flex-direction: column;
   gap: var(--spacing-sm);
 }
-.greek-card.seg-border-DRAFT   { border-top-color: var(--line-3); }
-.greek-card.seg-border-REVISED { border-top-color: var(--status-review); }
-.greek-card.seg-border-FINAL   { border-top-color: var(--status-done); }
+.greek-card.seg-border-TODO        { border-top-color: var(--line-3); }
+.greek-card.seg-border-IN_PROGRESS { border-top-color: var(--status-in-progress); }
+.greek-card.seg-border-DONE        { border-top-color: var(--status-done); }
 
 .greek-card-head {
   display: flex;
@@ -1063,51 +905,38 @@ main [data-view] {
 .greek-status-step:hover:not(.step-active) { color: var(--ink-2); border-color: var(--line-3); }
 
 .greek-status-step.step-active { color: var(--accent-ink); }
-.greek-status-step.step-active[data-status="DRAFT"]   { background: var(--status-todo); border-color: var(--status-todo); }
-.greek-status-step.step-active[data-status="REVISED"] { background: var(--status-review); border-color: var(--status-review); }
-.greek-status-step.step-active[data-status="FINAL"]   { background: var(--status-done); border-color: var(--status-done); }
+.greek-status-step.step-active[data-status="TODO"]        { background: var(--status-todo); border-color: var(--status-todo); }
+.greek-status-step.step-active[data-status="IN_PROGRESS"] { background: var(--status-in-progress); border-color: var(--status-in-progress); }
+.greek-status-step.step-active[data-status="DONE"]        { background: var(--status-done); border-color: var(--status-done); }
 
-.greek-card-fields {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-}
-.greek-card-fields label {
+/* Entry metadata: one labelled row per Notion multi-select that has values */
+.greek-chip-rows {
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+.greek-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.greek-chip-row .mono-label {
   color: var(--ink-3);
+  min-width: 56px;
+  flex-shrink: 0;
 }
 
-.greek-wc-input {
-  width: 110px;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid var(--line-2);
-  color: var(--ink-1);
-  font-family: var(--font-display);
-  font-size: 20px;
-  padding: 2px 0;
-  outline: none;
-  border-radius: 0;
-  -webkit-appearance: none;
-  appearance: none;
+.greek-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: auto;
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--line-2);
 }
-.greek-wc-input:focus { border-bottom-color: var(--accent); }
-
-.greek-notes-input {
-  width: 100%;
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  color: var(--ink-1);
-  font-family: var(--font-body);
-  font-size: 13px;
-  padding: 8px 10px;
-  outline: none;
-  resize: vertical;
-  border-radius: 0;
-}
-.greek-notes-input:focus { border-color: var(--accent); }
+.greek-mb-toggle.mb-on { color: var(--status-done); border-color: var(--status-done); }
 
 /* ============================================================
    PROJECTS (PM) VIEW
@@ -1131,37 +960,10 @@ main [data-view] {
   position: relative;
 }
 .project-card:hover { border-color: var(--accent); transform: translate(-2px, -2px); }
-.project-card.project-active {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-accent);
-}
-
 .project-phase-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.phase-badge {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.phase-ALPHA       { color: #FFA347; }
-.phase-BETA        { color: var(--accent); }
-.phase-LAUNCH      { color: var(--status-done); }
-.phase-MAINTENANCE { color: var(--status-review); }
-
-.active-badge {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--accent-ink);
-  background: var(--accent);
-  padding: 2px 6px;
-  letter-spacing: 0.05em;
 }
 
 .project-name { font-size: 34px; line-height: 0.9; }
@@ -1177,21 +979,6 @@ main [data-view] {
 }
 
 .project-stats { display: flex; gap: 6px; }
-
-.set-active-btn {
-  background: transparent;
-  border: none;
-  color: var(--ink-3);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  padding: 0;
-  transition: color 0.1s;
-  margin-top: 4px;
-  display: block;
-}
-.set-active-btn:hover { color: var(--accent); }
 
 .project-card-actions {
   display: flex;
@@ -1213,65 +1000,6 @@ main [data-view] {
 /* ============================================================
    TEAM VIEW
    ============================================================ */
-.team-list { display: flex; flex-direction: column; gap: 2px; }
-
-.team-row {
-  display: grid;
-  grid-template-columns: 48px 1fr auto auto;
-  align-items: center;
-  gap: var(--spacing-md);
-  padding: var(--spacing-sm) 4px;
-  border-bottom: 1px solid var(--line-1);
-}
-.team-row:hover { background: rgba(255, 255, 255, 0.025); }
-.team-row.has-blocked {
-  border-left: 3px solid var(--status-blocked);
-  padding-left: 8px;
-  background-image: var(--hazard);
-}
-
-.member-circle {
-  width: 32px; height: 32px;
-  border: 2px solid var(--accent);
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 11px;
-  color: var(--accent);
-  flex-shrink: 0;
-  letter-spacing: 0.02em;
-}
-.member-circle.has-blocked { border-color: var(--status-blocked); color: var(--status-blocked); }
-
-.member-circle-lg {
-  width: 44px; height: 44px;
-  border: 2px solid var(--accent);
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 13px;
-  color: var(--accent);
-  flex-shrink: 0;
-  letter-spacing: 0.02em;
-}
-.member-circle-lg.has-blocked { border-color: var(--status-blocked); color: var(--status-blocked); }
-
-.member-name { font-weight: 700; font-size: 16px; }
-.member-role { color: var(--ink-3); margin-top: 2px; }
-
-.member-stats { display: flex; gap: var(--spacing-sm); align-items: center; }
-
-.member-actions { display: flex; gap: 4px; align-items: center; }
-
-.delete-member-btn {
-  background: transparent;
-  border: none;
-  color: var(--ink-3);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 4px 8px;
-  transition: color 0.1s;
-}
-.delete-member-btn:hover { color: var(--status-blocked); }
-
 /* ============================================================
    MODAL
    ============================================================ */
@@ -1351,6 +1079,40 @@ main [data-view] {
 
 .modal-textarea { resize: vertical; min-height: 80px; }
 
+/* Chip picker — how every Notion multi-select is edited */
+.modal-field-inline { margin-bottom: var(--spacing-md); }
+
+.chip-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.chip-option {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-2);
+  background: var(--bg-3);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 5px 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.1s;
+}
+.chip-option:hover { border-color: var(--line-3); color: var(--ink-1); }
+.chip-option input { position: absolute; opacity: 0; width: 0; height: 0; }
+.chip-option.chip-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
 .modal-submit {
   margin-top: var(--spacing-sm);
   background: var(--accent);
@@ -1402,13 +1164,8 @@ main [data-view] {
 /* ============================================================
    RESPONSIVE
    ============================================================ */
-@media (max-width: 1400px) {
-  .board-5col { grid-template-columns: repeat(3, 1fr) !important; }
-}
-
 @media (max-width: 1280px) {
   .dashboard-grid,
-  .ee-layout,
   .greek-grid,
   .greek-top,
   .project-grid { grid-template-columns: 1fr; }

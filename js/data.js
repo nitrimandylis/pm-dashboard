@@ -1,5 +1,5 @@
 // ============================================================
-// DATA — IB Dashboard 2025-26
+// DATA — IB Dashboard
 // ============================================================
 
 // Private helpers
@@ -10,61 +10,75 @@ function uid(prefix) {
 function now() { return new Date().toISOString(); }
 
 // ============================================================
-// CONSTANTS
+// PROGRAMME DATES
+// The two numbers the dashboard countdown is built on. Check these against
+// the real exam timetable each September — everything else derives from them.
 // ============================================================
-// Subjects match Notion Assignments database
+export const YEAR_START = '2026-09-01';
+export const EXAM_DATE  = '2027-05-01'; // May 2027 session, first paper
+export const YEAR_LABEL = '2026/27';
+
+// ============================================================
+// CONSTANTS
+// Every list below mirrors a Notion select or multi-select. Adding a value
+// here that Notion does not have will silently create a new option on push.
+// ============================================================
+
+// Notion: Assignments → Subject
 export const SUBJECTS = [
   'CS HL', 'Math AA HL', 'English B HL', 'Business SL',
-  'Modern Greek SL', 'Global Politics SL', 'TOK', 'Other'
+  'Modern Greek A SL', 'Global Politics SL', 'TOK', 'MATH EXTRA', 'Other',
 ];
 
-export const STATUS     = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
+// Notion: Assignments → Status and Coding Tasks → Status (same four values)
+export const STATUS     = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE'];
 export const PRIORITY   = ['HIGH', 'NORMAL', 'LOW'];
 export const TASK_TYPES = ['Homework', 'IA', 'Assessment', 'Exam Prep', 'Project', 'Revision'];
 
-export const SIDE_QUEST_STATUSES = ['ACTIVE', 'PAUSED', 'DONE'];
-export const GREEK_TEXT_STATUSES = ['DRAFT', 'REVISED', 'FINAL'];
+// Notion: Side Quests
+export const SIDE_QUEST_STATUSES   = ['ONGOING', 'DONE', 'DROPPED'];
+export const SIDE_QUEST_CATEGORIES = ['Competition', 'Hackathon', 'MUN', 'Leadership', 'Build', 'Volunteering', 'Academic', 'Other'];
+export const SCHOOL_YEARS          = ['Pre-IB', 'Y1', 'Y2'];
 
-// Match Notion Coding Projects database
+// Notion: Coding Projects
 export const CODING_STATUSES   = ['IDEA', 'IN_PROGRESS', 'PAUSED', 'SHIPPED', 'ARCHIVED'];
-export const CODING_CATEGORIES = ['IB IA', 'Side Project', 'Competition', 'Learning', 'Tool/Automation', 'Web App'];
-export const CODING_STACKS     = ['Python', 'JavaScript', 'HTML/CSS', 'TypeScript', 'Swift', 'React', 'Node.js', 'Flask', 'Other'];
+export const CODING_CATEGORIES = ['CLI', 'IB IA', 'Side Project', 'Competition', 'Learning', 'Tool/Automation', 'Web App', 'Config/Files'];
+export const CODING_STACKS     = ['Python', 'JavaScript', 'HTML/CSS', 'TypeScript', 'Swift', 'Other'];
 export const CODING_TYPES      = ['Private', 'Public'];
 
-// ============================================================
-// SEED DATA
-// ============================================================
-const SEED_TASKS = []; // Populated from Notion on first sync
-
-const SEED_PROJECTS = [];
-
-const SEED_CODING = []; // Populated from Notion on first sync
-
-const SEED_GREEK = {
-  globalIssue: '',
-  texts: [],
-};
+// Notion: Modern Greek Portfolio. One row per portfolio entry.
+export const GREEK_STATUSES   = ['TODO', 'IN_PROGRESS', 'DONE'];
+export const GREEK_TEXTS      = ['Το μίσος', 'Το παλτό', 'Μπάρτλπυ ο γραφέας', 'Γκιακ', 'Τα 400 χτυπήματα', 'Ο ήχος του όπλου', 'Ο ταξιτζής', 'Φωτογραφίες'];
+export const GREEK_CONCEPTS   = ['Representation', 'Transformation', 'Perspective', 'Communication', 'Creativity', 'Culture', 'Identity'];
+export const GREEK_AREAS      = ['Intertextuality', 'Time and space', 'Readers writers and texts'];
+export const GREEK_ASSESSMENT = ['Individual Oral', 'Paper 1 — Guided Analysis', 'Paper 2 — Comparative Essay'];
+export const GREEK_FIELDS     = ['Culture identity and community', 'Beliefs values and education', 'Politics power and justice', 'Art creativity and the imagination', 'Science technology and the environment'];
+export const GREEK_READING    = ['Language', 'Prose: Non-Fiction', 'Prose: Fiction', 'Poetry', 'Drama'];
+export const GREEK_SKILLS     = ['Interactive', 'Productive', 'Receptive'];
 
 // ============================================================
 // PERSISTENCE
+// Everything is populated from Notion on first sync — there is no seed data.
 // ============================================================
 const STORE_KEYS = {
-  tasks:    'ib_tasks',
-  projects: 'ib_projects',
-  coding:   'ib_coding',
-  greek:    'ib_greek',
+  tasks:       'ib_tasks',
+  quests:      'ib_quests',
+  coding:      'ib_coding',
+  codingTasks: 'ib_coding_tasks',
+  greek:       'ib_greek',
 };
 
-// Bump this string whenever the tasks schema changes to wipe stale localStorage.
-const DATA_VERSION     = '6'; // v6: EE tracker replaced by coding projects
+// Bump this string whenever a schema changes to wipe stale localStorage.
+const DATA_VERSION     = '7'; // v7: Notion schema re-map — Greek entries, Coding Tasks, no dev-PM tickets
 const DATA_VERSION_KEY = 'ib_data_version';
 
 function migrateIfNeeded() {
-  if (localStorage.getItem(DATA_VERSION_KEY) !== DATA_VERSION) {
-    Object.values(STORE_KEYS).forEach(k => localStorage.removeItem(k));
-    localStorage.removeItem('ib_ee'); // legacy EE tracker store
-    localStorage.setItem(DATA_VERSION_KEY, DATA_VERSION);
-  }
+  if (localStorage.getItem(DATA_VERSION_KEY) === DATA_VERSION) return;
+  Object.values(STORE_KEYS).forEach(k => localStorage.removeItem(k));
+  // Stores from earlier versions of the dashboard, gone for good
+  ['ib_ee', 'ib_projects', 'sbg_tickets', 'sbg_team', 'sbg_active_project', 'sbg_data_version']
+    .forEach(k => localStorage.removeItem(k));
+  localStorage.setItem(DATA_VERSION_KEY, DATA_VERSION);
 }
 
 migrateIfNeeded();
@@ -85,13 +99,16 @@ export function saveData(key, value) {
 // ============================================================
 // MUTABLE STATE (live bindings)
 // ============================================================
-export let tasks    = loadData('tasks',    SEED_TASKS);
-export let projects = loadData('projects', SEED_PROJECTS);
-export let coding   = loadData('coding',   SEED_CODING);
-export let greek    = loadData('greek',    SEED_GREEK);
+export let tasks       = loadData('tasks',       []);
+export let quests      = loadData('quests',      []);
+export let coding      = loadData('coding',      []);
+export let codingTasks = loadData('codingTasks', []);
+export let greek       = loadData('greek',       []);
+
+export function generateId(prefix) { return uid(prefix); }
 
 // ============================================================
-// TASK CRUD
+// ASSIGNMENT CRUD
 // ============================================================
 export function createTask(data) {
   const t = { id: uid('task'), createdAt: now(), updatedAt: now(), ...data };
@@ -110,36 +127,38 @@ export function deleteTask(id) {
   saveData('tasks', tasks);
 }
 
-// Bulk-replace tasks (used by Notion sync)
-export function setTasks(newTasks) {
-  tasks = newTasks;
+export function setTasks(list) {
+  tasks = list;
   saveData('tasks', tasks);
 }
 
-export function generateId(prefix) { return uid(prefix); }
-
 // ============================================================
-// PROJECT CRUD
+// SIDE QUEST CRUD
 // ============================================================
-export function createProject(data) {
-  const p = { id: uid('proj'), ...data };
-  projects = [...projects, p];
-  saveData('projects', projects);
-  return p;
+export function createQuest(data) {
+  const q = { id: uid('quest'), category: [], ...data };
+  quests = [...quests, q];
+  saveData('quests', quests);
+  return q;
 }
 
-export function updateProject(id, patch) {
-  projects = projects.map(p => p.id === id ? { ...p, ...patch } : p);
-  saveData('projects', projects);
+export function updateQuest(id, patch) {
+  quests = quests.map(q => q.id === id ? { ...q, ...patch } : q);
+  saveData('quests', quests);
 }
 
-export function deleteProject(id) {
-  projects = projects.filter(p => p.id !== id);
-  saveData('projects', projects);
+export function deleteQuest(id) {
+  quests = quests.filter(q => q.id !== id);
+  saveData('quests', quests);
+}
+
+export function setQuests(list) {
+  quests = list;
+  saveData('quests', quests);
 }
 
 // ============================================================
-// CODING CRUD
+// CODING PROJECT CRUD
 // ============================================================
 export function createCoding(data) {
   const c = { id: uid('code'), stack: [], ...data };
@@ -164,75 +183,52 @@ export function setCoding(list) {
 }
 
 // ============================================================
-// GREEK CRUD
+// CODING TASK CRUD
 // ============================================================
-export function updateGreek(patch) {
-  greek = { ...greek, ...patch };
-  saveData('greek', greek);
-}
-
-export function updateGreekText(id, patch) {
-  greek = {
-    ...greek,
-    texts: greek.texts.map(t => t.id === id ? { ...t, ...patch } : t),
-  };
-  saveData('greek', greek);
-}
-
-// ============================================================
-// PM DATA — Dev Team Project Manager (legacy feature set)
-// ============================================================
-const PM_KEYS = {
-  tickets:       'sbg_tickets',
-  team:          'sbg_team',
-  activeProject: 'sbg_active_project',
-};
-
-// Bump to wipe stale seed data from localStorage
-const PM_DATA_VERSION     = '2';
-const PM_DATA_VERSION_KEY = 'sbg_data_version';
-if (localStorage.getItem(PM_DATA_VERSION_KEY) !== PM_DATA_VERSION) {
-  ['sbg_tickets', 'sbg_team', 'sbg_active_project'].forEach(k => localStorage.removeItem(k));
-  localStorage.setItem(PM_DATA_VERSION_KEY, PM_DATA_VERSION);
-}
-
-function readPM(key) {
-  try { return JSON.parse(localStorage.getItem(PM_KEYS[key])) ?? null; } catch { return null; }
-}
-function writePM(key, value) { localStorage.setItem(PM_KEYS[key], JSON.stringify(value)); }
-
-// PM Tickets
-export function getPMTickets() { return readPM('tickets') ?? []; }
-export function savePMTickets(list) { writePM('tickets', list); }
-export function createPMTicket({ projectId, title, assignee, priority, status, description, dueDate }) {
-  const t = {
-    id: uid('tick'), projectId, title,
-    assignee: assignee || '', priority: priority || 'NORMAL', status: status || 'TODO',
-    description: description || '', dueDate: dueDate || '',
-    createdAt: now(), updatedAt: now(),
-  };
-  savePMTickets([...getPMTickets(), t]);
+export function createCodingTask(data) {
+  const t = { id: uid('ctask'), createdAt: now(), updatedAt: now(), ...data };
+  codingTasks = [...codingTasks, t];
+  saveData('codingTasks', codingTasks);
   return t;
 }
-export function updatePMTicket(id, patch) {
-  savePMTickets(getPMTickets().map(t => t.id === id ? { ...t, ...patch, updatedAt: now() } : t));
-}
-export function deletePMTicket(id) { savePMTickets(getPMTickets().filter(t => t.id !== id)); }
 
-// PM Team
-export function getPMTeam() { return readPM('team') ?? []; }
-export function savePMTeam(list) { writePM('team', list); }
-export function createPMMember({ name, initials, role }) {
-  const m = { id: uid('member'), name, initials, role };
-  savePMTeam([...getPMTeam(), m]);
-  return m;
+export function updateCodingTask(id, patch) {
+  codingTasks = codingTasks.map(t => t.id === id ? { ...t, ...patch, updatedAt: now() } : t);
+  saveData('codingTasks', codingTasks);
 }
-export function updatePMMember(id, patch) {
-  savePMTeam(getPMTeam().map(m => m.id === id ? { ...m, ...patch } : m));
+
+export function deleteCodingTask(id) {
+  codingTasks = codingTasks.filter(t => t.id !== id);
+  saveData('codingTasks', codingTasks);
 }
-export function deletePMMember(id) { savePMTeam(getPMTeam().filter(m => m.id !== id)); }
 
-// PM Active Project
-export function getPMActiveProject() { return readPM('activeProject'); }
-export function setPMActiveProject(id) { writePM('activeProject', id); }
+export function setCodingTasks(list) {
+  codingTasks = list;
+  saveData('codingTasks', codingTasks);
+}
 
+// ============================================================
+// GREEK PORTFOLIO CRUD
+// greek is a flat list of portfolio entries, one per Notion row.
+// ============================================================
+export function createGreekEntry(data) {
+  const e = { id: uid('grk'), ...data };
+  greek = [...greek, e];
+  saveData('greek', greek);
+  return e;
+}
+
+export function updateGreekEntry(id, patch) {
+  greek = greek.map(e => e.id === id ? { ...e, ...patch } : e);
+  saveData('greek', greek);
+}
+
+export function deleteGreekEntry(id) {
+  greek = greek.filter(e => e.id !== id);
+  saveData('greek', greek);
+}
+
+export function setGreek(list) {
+  greek = list;
+  saveData('greek', greek);
+}

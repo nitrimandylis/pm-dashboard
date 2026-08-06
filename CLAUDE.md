@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Running the App
 
-Run with the bun server (required for ES modules and Notion API proxy):
+Run with the bun server (required for ES modules and the Notion API proxy):
 
 ```
 cp .env.example .env        # first time only
@@ -12,65 +12,87 @@ cp .env.example .env        # first time only
 bun server.js
 ```
 
-Open `http://localhost:8080`. **Do not open `index.html` directly** — ES modules require HTTP, and the Notion sync requires the proxy in `server.js`.
+Open `http://localhost:8090`. **Do not open `index.html` directly** — ES modules require HTTP, and the Notion sync requires the proxy in `server.js`.
+
+Port 8090, not 8080: glance runs on 8080 under launchd and would collide.
 
 The server proxies `/api/notion/*` → `https://api.notion.com/v1/*` using the key from `.env`. The key never reaches the browser.
 
 ## Architecture
 
-The app uses ES modules with two JS files and one CSS file. No framework, bundler, or build tool.
+ES modules, two JS files and one CSS file. No framework, bundler, or build tool.
 
 | File | Role |
 |---|---|
-| `js/data.js` | All constants, seed data, localStorage persistence, and CRUD functions |
-| `js/app.js` | Imports from data.js. Router, modal, helpers, all 5 view renderers, boot |
+| `js/data.js` | Programme dates, all constants, localStorage persistence, CRUD |
+| `js/app.js` | Router, modal, helpers, 5 view renderers, sync engine, boot |
+| `js/notion.js` | Notion client + field maps for all five databases |
 | `index.html` | 5-nav sidebar, 5 view containers, `<script type="module">` |
-| `style.css` | Design system tokens, all component styles, subject badge colors |
+| `style.css` | Design system tokens, component styles, subject badge colors |
 
-**`js/data.js`** top-to-bottom sections:
-- Constants: `SUBJECTS`, `STATUS`, `PRIORITY`, `SIDE_QUEST_STATUSES`, `GREEK_TEXT_STATUSES`, `CODING_STATUSES`, `CODING_CATEGORIES`, `CODING_STACKS`, `CODING_TYPES`
-- Seed data: empty seeds — everything populated from Notion on first sync
-- Persistence: `loadData(key, seed)` / `saveData(key, value)` using `STORE_KEYS`
-- Mutable state: `export let tasks / projects / coding / greek` (live ES module bindings)
-- CRUD: `createTask`, `updateTask`, `deleteTask`, `createProject`, `updateProject`, `deleteProject`, `createCoding`, `updateCoding`, `deleteCoding`, `setCoding`, `updateGreek`, `updateGreekText`
+**`js/data.js`** top-to-bottom:
+- Programme dates: `YEAR_START`, `EXAM_DATE`, `YEAR_LABEL`. The countdown and the year progress bar derive entirely from these — check them against the real exam timetable each September.
+- Constants: every list mirrors a Notion select or multi-select. Adding a value Notion does not have will silently create a new option on push.
+- Persistence: `loadData` / `saveData` over `STORE_KEYS`, gated by `DATA_VERSION`. Bump that string on any schema change to wipe stale localStorage.
+- Mutable state: `export let tasks / quests / coding / codingTasks / greek` (live ES module bindings). No seed data — everything is populated from Notion on first sync.
+- CRUD per entity, each ending in a `setX(list)` bulk replace used by the sync engine.
 
-**`js/app.js`** top-to-bottom sections:
-- IMPORTS: all from `./data.js`
-- ROUTER: hash-based, `registerView(id, fn)` + `navigateTo(id)` + `activateView(id)`. Nav items use `data-view`. View containers in `<main>` also use `data-view`; router selects them with `main [data-view]` to avoid collision.
-- MODAL: single shared overlay (`#modal-overlay` / `#modal-box`). `openModal({ title, fields, onSubmit })`
-- HELPERS: `esc()`, `fmtStatus()`, `fmtDate()`, `daysUntil()`, `subjectSlug()`, `subjectBadge()`, `getISOWeek()`, `updateMeta()`
-- DASHBOARD: `renderDashboard()` — deadline ticker, stat row, urgent list, subject load bars, exam countdown + year progress
-- ASSIGNMENTS: `initAssignments()` (injects toolbar into container), `renderAssignments()`, table/board toggle, task CRUD modals
-- CODING: `renderCoding()` — coding project cards synced with Notion Coding Projects DB (status cycle, category/stack chips, repo link, edit/delete)
-- GREEK PORTFOLIO: `renderGreekPortfolio()` — global issue, progress segments, text cards with status stepper / word count / notes
-- SIDE QUESTS (view id `projects`): `renderPM()` — projects / tickets / team tabs with CRUD
-- BOOT: `initModal()`, `initAssignments()`, `registerView()` calls, nav listeners, meta-grid init, `initRouter('dashboard')`
+**`js/app.js`** top-to-bottom:
+- ROUTER: hash-based, `registerView(id, fn)` + `navigateTo(id)` + `activateView(id)`. Nav items and view containers both use `data-view`; the router selects containers with `main [data-view]` to avoid collision. An unknown hash falls back to the default view rather than rendering blank.
+- MODAL: single shared overlay. `openModal({ title, fields, onSubmit })`. Field types: `text`, `date`, `url`, `textarea`, `select`, `multi` (chip picker for Notion multi-selects), `checkbox`. `collectFields` reads the form explicitly because `Object.fromEntries` collapses the repeated names a chip picker produces.
+- HELPERS: `esc()`, `fmtStatus()`, `fmtDate()`, `daysUntil()`, `chips()`, `dueChip()`, `subjectBadge()`, `armDelete()`, `getISOWeek()`.
+- DASHBOARD: deadline ticker (assignments + dev tasks), stat row, urgent list, subject load bars, exam countdown.
+- ASSIGNMENTS: table/board toggle, filters, sort, drag-and-drop, click-to-cycle status and priority.
+- CODING: two tabs over two databases — projects (cards) and tasks (table/board).
+- GREEK PORTFOLIO: one card per portfolio entry, status stepper, chip rows per multi-select, ManageBac toggle.
+- SIDE QUESTS: one card per logged quest, status cycle, filters by status / category / year.
+- NOTION SYNC: `SYNC_VIEWS` config table + one generic `syncView()`. Assignments have their own pull because they also carry a page body and a done-task cutoff.
+- BOOT: coding projects sync before coding tasks so the task→project relation can resolve to a name.
+
+## Notion Databases
+
+Five databases, all two-way. IDs live at the top of `js/notion.js`.
+
+| View | Database | Notes |
+|---|---|---|
+| Assignments | Assignments | `Overdue` is a read-only formula. `ManageBac` is filled by the siren watcher — read only here. |
+| Coding (projects) | Coding Projects | `Last Pushed`, `GitHub Repo ID`, `README synced` are written by the GitHub Actions sync — read only here. |
+| Coding (tasks) | Coding Tasks | `Project` is a relation to Coding Projects. `On Board` is a read-only formula. Empty relation is intentional for learning goals. |
+| Greek Portfolio | Modern Greek Portfolio | One row per portfolio *entry*, not per set text. Seven multi-selects. |
+| Side Quests | Side Quests | A record of things that happened, not a task list. `Business Venture` and the CAS / Project relations are curated in Notion — read only here. |
+
+**Never write a read-only property.** Formulas, rollups, and anything filled by an external sync will 400 or clobber.
 
 ## Data Model
 
-All data stored in localStorage as JSON:
+localStorage, one key per entity:
 
-- `ib_tasks` → `{ id, title, subject, deadline, priority, status, notes, createdAt, updatedAt }`
-- `ib_projects` → `{ id, name, status, lastAction, nextStep, priority }`
+- `ib_tasks` → `{ id, notionId, title, subject, deadline, priority, status, type, notes, managebacUrl, body, createdAt, updatedAt, notionUpdatedAt }`
+- `ib_quests` → `{ id, notionId, name, status, date, role, schoolYear, category: [], notes, outcome, link, businessVenture: [], notionUpdatedAt }`
 - `ib_coding` → `{ id, notionId, name, status, category, stack: [], type, description, repoUrl, started, lastPushed, notionUpdatedAt }`
-- `ib_greek` → `{ globalIssue, texts: [{ id, title, wordCount, status, notes }] }`
+- `ib_coding_tasks` → `{ id, notionId, title, status, priority, deadline, notes, projectNotionId, createdAt, updatedAt, notionUpdatedAt }`
+- `ib_greek` → `{ id, notionId, title, status, date, onManageBac, texts: [], concepts: [], areas: [], assessment: [], fields: [], readingLog: [], skills: [], notionUpdatedAt }`
 
-Enum values:
-- `subject`: MATH HL | ENGLISH HL | GREEK B HL | HISTORY HL | BIOLOGY SL | FILM SL | TOK
-- `priority`: CRITICAL | HIGH | NORMAL | LOW
-- `status` (tasks): TODO | IN_PROGRESS | REVIEW | DONE | BLOCKED
-- `status` (projects): ACTIVE | PAUSED | DONE
-- `status` (coding): IDEA | IN_PROGRESS | PAUSED | SHIPPED | ARCHIVED
-- `status` (greek texts): DRAFT | REVISED | FINAL
+Enum values (UI side; `js/notion.js` maps each to its Notion wording):
+- `status`: `TODO | IN_PROGRESS | BLOCKED | DONE` — assignments and coding tasks share one vocabulary. Greek uses the same three-of-four minus `BLOCKED`, and renders `TODO` as "Not Started" to match Notion.
+- `priority`: `HIGH | NORMAL | LOW` → `🔥 High | ⚡ Medium | 🧊 Low`
+- `status` (coding projects): `IDEA | IN_PROGRESS | PAUSED | SHIPPED | ARCHIVED`
+- `status` (side quests): `ONGOING | DONE | DROPPED`
+
+## Sync Model
+
+Last write wins, compared on `notionUpdatedAt`. Local edits queue on a 2s debounce (`schedulePush`) and flush to Notion; a manual sync flushes pending pushes *before* pulling, otherwise a sync fired inside the debounce window would overwrite an unsent edit.
+
+A first sync on an empty store is effectively read-only: nothing local exists to push.
 
 ## Design System
 
 Industrial brutalist "mission control": hard edges (no border radius), hard offset
 shadows, stencil display type, lime signal color on near-black layered surfaces.
-Webfonts loaded from Google Fonts in `index.html` (Archivo Black / Space Grotesk /
+Webfonts from Google Fonts in `index.html` (Archivo Black / Space Grotesk /
 JetBrains Mono) with local fallbacks (Impact / Helvetica / monospace).
 
-Defined in `style.css` CSS variables. Key tokens:
+Key tokens in `style.css`:
 
 ```
 --accent: #E8FF47          (lime yellow — primary CTA, active nav, section underlines)
@@ -79,7 +101,6 @@ Defined in `style.css` CSS variables. Key tokens:
 --ink-1 … --ink-3          (text ladder: primary → secondary → muted)
 --status-blocked: #FF4747
 --status-in-progress: var(--accent)
---status-review: #47C3FF
 --status-done: #47FF8A
 --shadow-hard / --shadow-hard-sm   (offset box shadows on panels/cards/buttons)
 --hazard                   (diagonal red striping — overdue rows, blocked cards)
@@ -88,22 +109,18 @@ Defined in `style.css` CSS variables. Key tokens:
 ```
 
 CSS class conventions:
-- `.s-{STATUS}` — status chip color (e.g. `.s-BLOCKED`); `.status-badge` renders a bordered chip tinted via `currentColor`
-- `.s-greek-{STATUS}` — Greek text status chip colors (DRAFT/REVISED/FINAL)
-- `.p-{PRIORITY}` — priority label with leading square dot (`::before`)
-- `.p-dot-{PRIORITY}` — priority circle dot (8px)
+- `.s-{STATUS}` — status chip color; `.status-badge` renders a bordered chip tinted via `currentColor`
+- `.p-{PRIORITY}` / `.p-dot-{PRIORITY}` — priority label with leading square dot / 8px circle dot
 - `.s-border-{STATUS}` — board card left-border color
+- `.seg-border-{STATUS}` — Greek entry card top-border color
 - `.subject-badge.subj-{slug}` — subject chip with background color
+- `.chip-picker` / `.chip-option` / `.chip-on` — how every Notion multi-select is edited
 - `.mono-label` — 10px uppercase mono tracking label
 - `.display-text` — display font, uppercase, tight line-height
-- `.data-section` — panel: raised surface + border + hard shadow (all views)
-- `.section-header` / `.panel-header` — accent-underlined display header / small mono header
-- `.action-btn` (+ `.ghost`, `.sm`) — accent outline button / muted variant / compact variant
-- `.due-chip` (+ `.chip-danger`) — mono date/days chip; danger turns it red
+- `.data-section` — panel: raised surface + border + hard shadow
+- `.action-btn` (+ `.ghost`, `.sm`) — accent outline button / muted / compact
+- `.due-chip` (+ `.chip-danger`, `.chip-link`) — mono date/days chip
 - `.overdue-row` — hazard striping + red left border on task rows
-- `.board-5col` — overrides board grid to 5 columns (used in assignments board)
-- `.ticker-wrap` / `.ticker` — dashboard deadline marquee (duplicated `.ticker-group`s, CSS keyframe scroll)
-- `.ee-*` — legacy EE tracker styles (view removed; classes unused)
-- `.greek-*` — Greek portfolio (text cards, status stepper, progress segments)
+- `.ticker-wrap` / `.ticker` — dashboard deadline marquee
 
-HTML pattern: each view is a `<div data-view="viewname">` inside `<main>`. The router shows/hides them with `main [data-view]` selector. Nav items use `data-view` attribute for the same view IDs.
+HTML pattern: each view is a `<div data-view="viewname">` inside `<main>`. The router shows/hides them with `main [data-view]`.
